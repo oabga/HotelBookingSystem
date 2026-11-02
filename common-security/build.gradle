@@ -1,0 +1,12 @@
+plugins {
+    id 'buildlogic.java-library-conventions'
+}
+
+dependencies {
+    // Shared JWT/tenant handling only — no servlet or reactive web starter here,
+    // since this module is used by both the reactive api-gateway and the
+    // servlet-based business services.
+    api 'org.springframework.boot:spring-boot-starter-security'
+    api 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+    api 'org.springframework.boot:spring-boot-starter-validation'
+}

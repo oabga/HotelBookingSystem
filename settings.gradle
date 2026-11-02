@@ -11,4 +11,10 @@ plugins {
 }
 
 rootProject.name = 'HotelBookingSystem'
-include('app', 'list', 'utilities')
+include(
+    'api-gateway',
+    'common-security',
+    'catalog-service',
+    'booking-service',
+    'notification-service'
+)
