@@ -2,7 +2,7 @@
 
 Cập nhật: 2026-11-02
 
-> Đây là bản plan cho một **demo thu hẹp phạm vi** so với `team-plan.md` và `StayHub_Execution_Roadmap_ABCD_3Days.md`: bỏ hẳn booking/payment/notification, chỉ còn IAM tự dựng (OAuth2 với Google) + quản lý phòng (xem/thêm/sửa giá) theo tenant.
+> Đây là bản plan cho một **demo thu hẹp phạm vi** so với `team-plan.md` và `StayHub_Execution_Roadmap_ABCD_3Days.md`: bỏ payment/notification/push, chỉ còn IAM tự dựng (OAuth2 với Google) + quản lý phòng (xem/thêm/sửa giá) + đặt phòng (booking) tối giản theo tenant.
 
 ## Phạm vi
 
