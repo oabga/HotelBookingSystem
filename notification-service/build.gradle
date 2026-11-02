@@ -1,0 +1,10 @@
+plugins {
+    id 'buildlogic.java-library-conventions'
+}
+
+dependencies {
+    api project(':common')
+    api 'org.springframework.boot:spring-boot-starter-data-jpa'
+    runtimeOnly 'org.postgresql:postgresql'
+    api 'com.google.firebase:firebase-admin:9.4.1'
+}

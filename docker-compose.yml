@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: hotelbooking-postgres
+    environment:
+      POSTGRES_DB: hotelbooking
+      POSTGRES_USER: hotelbooking
+      POSTGRES_PASSWORD: hotelbooking
+    ports:
+      - "5432:5432"
+    volumes:
+      - hotelbooking-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hotelbooking -d hotelbooking"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  hotelbooking-pgdata:

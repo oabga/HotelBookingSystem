@@ -1,0 +1,10 @@
+plugins {
+    id 'buildlogic.java-library-conventions'
+}
+
+dependencies {
+    api project(':common')
+    api project(':catalog-service')
+    api 'org.springframework.boot:spring-boot-starter-data-jpa'
+    runtimeOnly 'org.postgresql:postgresql'
+}
