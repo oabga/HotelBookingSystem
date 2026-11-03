@@ -4,6 +4,8 @@
 --   psql "postgresql://hotelbooking:hotelbooking@localhost:5432/hotelbooking" -f docker/seed/seed-app-users.local.sql
 --
 -- tenant_id = 1 -> Tenant 1 - Demo Hotel A, tenant_id = 2 -> Tenant 2 - Demo Hotel B (theo V2__seed_tenants.sql)
+-- Email PHẢI viết thường toàn bộ (DB có CHECK email = lower(email)) — Gmail không phân biệt hoa/thường
+-- nhưng app_user.email thì có, nên luôn insert/so khớp bằng chữ thường.
 
 INSERT INTO app_user (email, tenant_id, role) VALUES
     ('admin-tenant1@example.com', 1, 'ADMIN'),

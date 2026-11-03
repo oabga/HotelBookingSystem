@@ -85,7 +85,7 @@ quản lý migration cho bảng của mình (ranh giới ownership giữ nguyên
 
 **Version gate trước khi code:** A xác minh phiên bản Spring Boot / Spring Security / Spring Cloud (nếu có dùng) / Gradle wrapper tương thích. **Không tự nâng cấp toàn repo chỉ vì thấy có phiên bản mới hơn**; ghi phiên bản khóa trong `docs/decisions.md`, chạy `./gradlew build` được rồi mới yêu cầu các service cùng tuân thủ.
 
-**Cơ sở dữ liệu (đã đổi so với bản đầu v2):** một PostgreSQL server local, **1 database chung** `hotelbooking`, 1 schema `public`. Không tách `iam_db`/`catalog_db`/`booking_db`/`notification_db` riêng — lý do: hệ thống nhỏ, 1 nhóm, không cần scale/deploy schema độc lập giữa service, và "database-per-service" không phải chủ đề mentor chấm (xem §10) nên không cần trả giá độ phức tạp đó. Đổi lại, có **FK thật** giữa các bảng (`room.tenant_id → tenant.id`, `booking.tenant_id → tenant.id`, `booking.room_id → room.id`, `booking.user_email → app_user.email`), DB tự chặn dữ liệu rác thay vì phải tự verify bằng code như bản tách DB.
+**Cơ sở dữ liệu (đã đổi so với bản đầu v2):** một PostgreSQL server local, **1 database chung** `hotelbooking`, 1 schema `public`. Không tách `iam_db`/`catalog_db`/`booking_db`/`notification_db` riêng — lý do: hệ thống nhỏ, 1 nhóm, không cần scale/deploy schema độc lập giữa service, và "database-per-service" không phải chủ đề mentor chấm (xem §10) nên không cần trả giá độ phức tạp đó. Đổi lại, có **FK thật** giữa các bảng — `room.tenant_id → tenant.id`, `booking.tenant_id → tenant.id`, và 2 FK **ghép (composite)** `booking.(tenant_id, room_id) → room.(tenant_id, id)` + `booking.(tenant_id, user_email) → app_user.(tenant_id, email)` để chặn luôn trường hợp room/user tồn tại nhưng **sai tenant** (FK đơn cột không chặn được điều này — xem `docs/erd-v2.md` mục 2). DB tự chặn dữ liệu rác thay vì phải tự verify bằng code như bản tách DB.
 
 Mỗi service **vẫn chỉ sở hữu và chạy migration cho bảng của mình** (A: `tenant`, `app_user`; B: `room`; C: `booking`) — ranh giới ownership giữa A/B/C/D giữ nguyên như §6, chỉ khác là 3 bộ migration cùng ghi vào 1 database. Để 3 bộ Flyway độc lập không đụng version với nhau, mỗi service dùng riêng `spring.flyway.table` (`flyway_schema_history_iam`, `flyway_schema_history_catalog`, `flyway_schema_history_booking`) — nếu không, Flyway sẽ coi version `1`/`2` của service này đã "chạy" khi thấy version đó trong lịch sử của service khác.
 
@@ -141,7 +141,7 @@ Mỗi service **vẫn chỉ sở hữu và chạy migration cho bảng của mì
 | `tenant` | A | `id`, `name` | — |
 | `app_user` | A | `id`, `email` unique, `tenant_id`, `role (USER/ADMIN)`, `google_sub` (nếu gắn danh tính) | `tenant_id → tenant.id` |
 | `room` | B | `id`, `tenant_id`, `name`, `price`, `available BOOLEAN DEFAULT true` | `tenant_id → tenant.id` |
-| `booking` | C | `id`, `tenant_id`, `room_id`, `user_email`, `status=CONFIRMED`, `created_at` | `tenant_id → tenant.id`, `room_id → room.id`, `user_email → app_user.email` |
+| `booking` | C | `id`, `tenant_id`, `room_id`, `user_email`, `status=CONFIRMED`, `created_at` | `tenant_id → tenant.id`; FK ghép `(tenant_id, room_id) → room(tenant_id, id)`; FK ghép `(tenant_id, user_email) → app_user(tenant_id, email)` |
 
 - Flyway tạo schema, constraints/index, FK thật như trên; có seed data có thể tái hiện.
 - Mỗi service dùng riêng `spring.flyway.table` (`flyway_schema_history_iam`/`_catalog`/`_booking`) vì 3 bộ migration độc lập cùng ghi vào 1 database — tránh đụng số version giữa các service.
