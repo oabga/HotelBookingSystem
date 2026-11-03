@@ -142,7 +142,7 @@ Tenant 1 có hai khách sạn để bước chọn khách sạn có ý nghĩa kh
 **`room_type`**
 
 | id | tenant_id | hotel_id | name | capacity | base_price (mỗi phòng/đêm) | total_rooms | Dùng cho |
-|---|---|---|---|---|---|---|---|---|
+|---|---|---|---|---|---|---|---|
 | 1 | 1 | 1 | Standard | 2 | 500,000 | 3 | Luồng chính |
 | 2 | 1 | 1 | Deluxe | 2 | 900,000 | 4 | Luồng chính |
 | 3 | 2 | 2 | Standard | 2 | 450,000 | 5 | Kiểm thử khác tenant |
