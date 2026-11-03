@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StayHub — App 1</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/auth.js" defer></script>
+  <script src="/rooms.js" defer></script>
+  <script src="/demo-ui.js" defer></script>
+</head>
+<body data-app-id="app1">
+  <div class="page-shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">S</span> StayHub</div>
+      <span class="origin-tag">App 1 · localhost:3000</span>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="page-title">
+        <div>
+          <span class="eyebrow">Frontend demo · App 1</span>
+          <h1 id="page-title">Chọn phòng và thời gian lưu trú.</h1>
+          <p>Đăng nhập bằng Google, xem phòng theo tenant và gửi yêu cầu đặt phòng theo khoảng thời gian.</p>
+        </div>
+        <div class="login-card">
+          <h2>Phiên đăng nhập</h2>
+          <p>Đăng nhập qua IAM của StayHub. JWT chỉ được giữ trong bộ nhớ của trang.</p>
+          <button id="login-button" type="button" disabled>Login with Google</button>
+          <p id="login-status" role="status">Chưa đăng nhập.</p>
+        </div>
+      </section>
+
+      <div class="account-strip" aria-label="Thông tin phiên">
+        <div class="account-item"><span>Người dùng</span><strong id="user-email">Chưa đăng nhập</strong></div>
+        <div class="account-item"><span>Role từ JWT</span><strong id="user-role">Chưa xác định</strong></div>
+        <div class="account-item"><span>Tenant từ JWT</span><strong id="user-tenant">Chưa xác định</strong></div>
+      </div>
+      <p class="status" id="integration-status">Danh sách phòng, Booking và ADMIN cần JWT.</p>
+
+      <section class="section" aria-labelledby="rooms-title">
+        <div class="section-heading">
+          <div><span class="eyebrow">01 · Phòng</span><h2 id="rooms-title">Danh sách phòng</h2></div>
+          <p>Hiển thị ID, tên và giá. Chọn phòng rồi gửi khoảng thời gian; Booking API quyết định có đặt được hay không.</p>
+        </div>
+        <p id="rooms-status" class="status" role="status">Đăng nhập để xem phòng.</p>
+        <ul id="room-list" class="room-list" aria-label="Danh sách phòng"></ul>
+      </section>
+
+      <section class="section" aria-labelledby="actions-title">
+        <div class="section-heading">
+          <div><span class="eyebrow">02 · Thao tác</span><h2 id="actions-title">Thao tác theo role</h2></div>
+          <p>Booking dành cho USER; quản lý phòng dành cho ADMIN.</p>
+        </div>
+        <p id="actions-status" class="status" role="status">Đăng nhập để mở thao tác theo role.</p>
+        <div class="action-grid">
+          <section class="panel" aria-labelledby="booking-title">
+            <span class="eyebrow">USER · Booking API</span>
+            <h3 id="booking-title">Đặt phòng</h3>
+            <p class="note">Chọn phòng từ danh sách phía trên và khoảng check-in/check-out. Booking API xác nhận hoặc trả lỗi trùng giờ.</p>
+            <form id="booking-form" novalidate>
+              <fieldset id="booking-fields" disabled>
+                <div class="form-grid">
+                  <label class="field full" for="book-room-id">Room ID<input id="book-room-id" type="number" min="1" step="1" placeholder="Chọn phòng từ danh sách" readonly></label>
+                  <label class="field" for="check-in">Check-in<input id="check-in" type="datetime-local"></label>
+                  <label class="field" for="check-out">Check-out<input id="check-out" type="datetime-local"></label>
+                </div>
+                <button id="booking-submit" class="action-button" type="submit">Đặt phòng</button>
+              </fieldset>
+            </form>
+            <p id="booking-action-status" class="feedback" role="status">Chưa có yêu cầu đặt phòng.</p>
+            <div class="subsection">
+              <h4>Booking của tôi</h4>
+              <p id="bookings-status" class="placeholder">Chưa kết nối Booking API. Chưa có dữ liệu để hiển thị.</p>
+            </div>
+          </section>
+
+          <section id="admin-panel" class="panel" aria-labelledby="admin-title" hidden>
+            <span class="eyebrow">ADMIN · Rooms API</span>
+            <h3 id="admin-title">Quản lý phòng</h3>
+            <p class="note">Role chỉ điều khiển giao diện; backend xác minh JWT và quyền ADMIN.</p>
+            <form id="create-room-form" novalidate>
+              <fieldset id="create-room-fields" disabled>
+                <div class="form-grid">
+                  <label class="field full" for="new-room-name">Tên phòng<input id="new-room-name" type="text" autocomplete="off" placeholder="Tên phòng mới"></label>
+                  <label class="field full" for="new-room-price">Giá phòng<input id="new-room-price" type="number" min="0.01" max="99999999.99" step="0.01" placeholder="Giá VND"></label>
+                </div>
+                <button id="create-room-submit" class="action-button secondary-button" type="submit">Thêm phòng</button>
+              </fieldset>
+            </form>
+            <p id="admin-create-status" class="feedback" role="status">Chưa có yêu cầu thêm phòng.</p>
+            <div class="subsection">
+              <h4>Sửa giá</h4>
+              <form id="price-form" novalidate>
+                <fieldset id="price-fields" disabled>
+                  <div class="form-grid">
+                    <label class="field" for="price-room-id">Room ID<input id="price-room-id" type="number" min="1" step="1" placeholder="Chọn từ danh sách" readonly></label>
+                    <label class="field" for="room-price">Giá mới<input id="room-price" type="number" min="0.01" max="99999999.99" step="0.01"></label>
+                  </div>
+                  <button id="price-submit" class="action-button secondary-button" type="submit">Sửa giá</button>
+                </fieldset>
+              </form>
+              <p id="admin-price-status" class="feedback" role="status">Chưa có yêu cầu sửa giá.</p>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer-note">StayHub demo · Claims ở frontend chỉ phục vụ hiển thị. Backend xác minh quyền và quyết định kết quả Booking.</footer>
+  </div>
+</body>
+</html>
