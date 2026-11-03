@@ -15,6 +15,12 @@ spring:
   flyway:
     locations: classpath:db/migration
     table: flyway_schema_history_iam
+    # 3 service dùng chung schema "public" trên 1 database, mỗi service 1 bảng
+    # history riêng -> service chạy sau thấy schema "public" đã có bảng (do
+    # service chạy trước tạo) nhưng chưa có bảng history CỦA NÓ, nên Flyway đòi
+    # baseline. baseline-version: 0 đảm bảo baseline nằm DƯỚI V1 nên V1 vẫn chạy.
+    baseline-on-migrate: true
+    baseline-version: 0
   security:
     oauth2:
       client:
