@@ -1,47 +1,40 @@
 # Ghi chú nghiệp vụ đặt phòng
 
-Owner: Phúc (C). Phần "Demo đang làm" bám theo [erd-v2.md](erd-v2.md). Phần "Thực tế" là kiến thức nghiệp vụ để trình bày, demo không code.
+Owner: Phúc (C). Phần demo bám theo [erd-v2.md](erd-v2.md) và [api-contract.md](api-contract.md).
 
 ## Quy tắc trong demo
 
-- Mỗi `room` là một phòng cụ thể, đặt theo khoảng thời gian `[checkIn, checkOut)` có giờ thật. Một phòng có nhiều booking được, miễn không đè giờ nhau.
-- Trả phòng đúng lúc người sau nhận phòng thì không tính là đè giờ.
-- Chỉ role `USER` được đặt phòng. `ADMIN` xem được mọi booking trong tenant của mình nhưng không đặt.
-- Đặt được là booking `CONFIRMED` ngay. Đây là trạng thái duy nhất trong demo.
-- `tenantId` và `userEmail` chỉ lấy từ JWT đã xác minh, không lấy từ dữ liệu client gửi. Email được đổi về chữ thường trước khi lưu.
-- Booking không lưu giá, vì bảng `booking` trong ERD không có cột giá.
+- Khách chọn khách sạn, ngày nhận và trả phòng, rồi bấm **Tìm kiếm**; chỉ khi đó hệ thống mới trả các loại phòng còn tồn đủ mọi đêm.
+- Đơn vị bán là loại phòng (`room_type`), không phải phòng cụ thể. Một dòng `room_inventory` là số phòng bán được của một loại phòng trong một đêm.
+- Kỳ ở là `[checkIn, checkOut)`: tính đêm nhận phòng, không tính đêm trả phòng. `room_type.base_price` là giá cho **một phòng, một đêm**; tổng tiền được chốt khi tạo booking: `base_price × số đêm × roomCount`.
+- `room_type` không có trường `code`. `hotel` lưu `address` (địa chỉ), không dùng `city`.
+- `PENDING_PAYMENT` giữ tồn ngay để người khác không thể đặt số phòng đó trong cùng kỳ. Thanh toán mô phỏng chuyển `PENDING_PAYMENT → CONFIRMED`; cả hai trạng thái đều tiếp tục giữ tồn.
+- Khi chủ đơn huỷ booking đang `PENDING_PAYMENT`, trạng thái chuyển sang `CANCELLED` và tồn được trả lại cho tất cả đêm trong kỳ. Booking `CANCELLED` không còn giữ tồn, nên lần tìm kiếm sau có thể hiển thị phòng cho user khác.
+- Đơn `PENDING_PAYMENT` quá hạn chuyển sang `EXPIRED` và cũng trả tồn. Cả đổi trạng thái và cập nhật tồn phải nằm trong cùng transaction; chỉ trả tồn nếu trạng thái thực sự được đổi.
+- `USER` chỉ xem và huỷ booking của mình. `ADMIN` mới được xem tổng tồn (`total`, `sold`, `available`) và quản trị số lượng tồn trong tenant. API tìm kiếm công khai cho user chỉ trả số phòng còn có thể đặt, không tiết lộ tổng tồn.
+- `tenantId`, email người đặt, giá và trạng thái booking do server xác định từ JWT/database; client không thể tự gửi để ghi đè.
+- Không xoá booking đã huỷ/hết hạn; giữ lịch sử. Huỷ lặp lại không được trừ tồn lần thứ hai.
+
+## Hai người cùng đặt
+
+Booking tăng `room_inventory.sold` có điều kiện cho từng đêm, theo thứ tự ngày tăng dần, rồi thêm booking trong cùng transaction `READ COMMITTED`. Nếu bất kỳ đêm nào không đủ tồn hoặc chưa mở bán, rollback toàn bộ và trả `409`. Như vậy hai request đồng thời không thể bán vượt `total`.
+
+Tìm kiếm chỉ là ảnh chụp tại thời điểm đọc; booking phải kiểm tra và trừ tồn lại. Không dùng `SELECT` availability làm cơ chế giữ phòng. Booking và tồn phải cùng commit hoặc cùng rollback.
 
 ## So sánh với thực tế
 
 | Chủ đề | Thực tế | Demo đang làm |
 | --- | --- | --- |
-| Giữ chỗ | Giữ tồn kho theo từng đêm trong một khoảng thời gian ngắn, hết hạn thì tự trả | Không có bước giữ chỗ, `INSERT` được là đặt xong |
-| Thanh toán | Khách trả trước, trả một phần hoặc trả tại khách sạn. Booking chỉ xác nhận sau khi thanh toán hoặc bảo đảm thành công | Không có thanh toán |
-| Hủy phòng | Theo chính sách của từng loại giá: miễn phí đến một mốc, sau đó mất phí, hoặc không hoàn | Không có hủy |
-| No-show | Khách không đến: khách sạn thường thu phí đêm đầu hoặc toàn bộ, rồi trả phần phòng còn lại | Không xử lý |
-| Hoàn tiền | Tính theo chính sách hủy, hoàn về phương thức đã thanh toán | Không có hoàn tiền |
-| Giá | Lưu lại giá tại thời điểm đặt, để đổi giá sau này không ảnh hưởng booking cũ | Giá thuộc Catalog, booking không lưu |
-| Giờ nhận và trả phòng | Khách sạn quy định giờ cố định, thường trả phòng sớm hơn giờ nhận để có thời gian dọn | Client tự gửi giờ, service không áp giờ quy định |
-
-## Hai người tranh một khoảng giờ
-
-Ràng buộc `EXCLUDE` trên `(room_id, tstzrange(check_in, check_out))` do database kiểm tra nguyên tử, nên hai booking đè giờ không thể cùng tồn tại. Nếu `SELECT` kiểm tra còn trống rồi mới `INSERT`, cả hai request có thể cùng thấy phòng trống và đều đặt được. Vì vậy service chỉ `INSERT` rồi đổi lỗi của database thành `409`.
-
-`EXCLUDE` chỉ xét `room_id` và chạy trước các FK, nên phòng của tenant khác cũng có thể báo đè giờ. Khi đó service kiểm tra lại phòng có thuộc tenant của người gọi không và trả `404` nếu không thuộc, để không lộ lịch đặt phòng của tenant khác.
-
-## Mua vé khác đặt phòng ở đâu
-
-| | Đặt phòng khách sạn | Mua vé (máy bay, sự kiện) |
-| --- | --- | --- |
-| Đơn vị tồn kho | Số phòng theo từng đêm, phòng cùng loại thường thay thế được cho nhau | Một ghế hoặc suất cụ thể theo chuyến hoặc suất diễn |
-| Thời gian | Một khoảng nhiều đêm, phải còn chỗ ở mọi đêm | Một thời điểm cố định |
-| Giữ chỗ | Có thể giữ lâu hơn, nhiều nơi cho trả tại khách sạn | Giữ rất ngắn trong lúc thanh toán |
-| Kết quả | Mã xác nhận, nhận phòng tại quầy | Vé điện tử, thường cần phát hành và soát vé |
-| Thay đổi, hủy | Thường linh hoạt hơn | Thường chặt hơn, có thể không hoàn hoặc tính phí đổi |
+| Tồn kho | Có thể quản lý theo loại phòng, ngày, kế hoạch bảo trì và phân bổ kênh | `room_inventory` lưu `total`/`sold` theo từng đêm |
+| Thanh toán | Có thể trả trước, một phần hoặc tại khách sạn; cần đối soát giao dịch | Mô phỏng thành công, không kết nối cổng thanh toán |
+| Huỷ phòng | Tuỳ chính sách giá, thời điểm, phí huỷ và hoàn tiền | User huỷ được khi `PENDING_PAYMENT`; đổi sang `CANCELLED` và trả tồn |
+| Giá | Có thể thay đổi theo ngày, mùa, kênh và điều kiện giá | Một `base_price` cho mỗi loại phòng, áp dụng mỗi đêm; snapshot vào `total_amount` |
+| Phân phòng | Gán số phòng cụ thể gần ngày nhận phòng | Không gán số phòng; demo bán tồn theo loại phòng |
 
 ## Giới hạn cần nói rõ khi demo
 
-1. **Chưa chặn đặt phòng trong quá khứ:** ERD chưa có quy tắc này nên service nhận mọi thời điểm từ năm 2000 đến 9999, chỉ yêu cầu `checkOut` sau `checkIn`.
-2. **Phụ thuộc qua bảng dùng chung:** Booking phụ thuộc trực tiếp vào bảng `room` và `app_user` của service khác qua FK, thay vì gọi API. Đổi lại, database tự chặn dữ liệu sai tenant, và thứ tự migrate bắt buộc là IAM → Catalog → Booking.
-3. **Không có idempotency key:** gửi lại cùng request sẽ nhận `409` vì đè giờ với chính booking trước đó, không tạo booking thứ hai, nhưng client không nhận lại được booking đó qua API tạo mới.
-4. **Có thể chậm khi tranh chấp đồng thời:** các `INSERT` đè giờ cùng lúc có thể chờ lẫn nhau cho đến khi PostgreSQL phát hiện deadlock và hủy một bên (mặc định sau 1 giây). Bên bị hủy vẫn nhận `409`. Kết quả đúng nhưng phản hồi có thể mất vài giây khi nhiều request cùng tranh một khoảng giờ.
+1. Tồn kho được tạo sẵn trong khoảng ngày mở bán theo thiết kế tại `erd-v2.md`; ngày không có dòng inventory không được coi là còn phòng.
+2. `sold` khớp với booking là trách nhiệm service: phải cập nhật cùng transaction ở bước tạo, huỷ và hết hạn. Truy vấn đối soát tại `erd-v2.md` §8 phải trả 0 dòng.
+3. Không có idempotency key; gửi lại yêu cầu đặt có thể tạo booking khác nếu vẫn còn tồn.
+4. Thanh toán chỉ mô phỏng; không có hoàn tiền, phí huỷ hoặc giao dịch tiền thật.
+5. `base_price` không biến thiên theo ngày. Đổi giá chỉ ảnh hưởng booking mới, booking cũ giữ `total_amount` đã chốt.

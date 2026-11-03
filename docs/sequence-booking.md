@@ -1,89 +1,134 @@
-# Sequence diagram: Đặt phòng
+# Sequence diagram: Tìm kiếm, đặt, thanh toán và huỷ booking
 
-Owner: Phúc (C). Bám theo [api-contract.md §5](api-contract.md), [erd-v2.md §3 và §4](erd-v2.md) và code trong `booking-service`.
+Owner: Phúc (C). Bám theo [api-contract.md §4–5](api-contract.md) và [erd-v2.md](erd-v2.md). `hotelbooking` là database chung.
 
-Nét liền là yêu cầu, nét đứt là phản hồi. `hotelbooking` là database chung của cả hệ thống.
-
-## Đặt phòng và các nhánh lỗi
+## Tìm kiếm sau khi người dùng gửi đủ lựa chọn
 
 ```mermaid
 sequenceDiagram
     actor User as USER
+    participant UI as Frontend
+    participant Gateway as api-gateway
+    participant Catalog as catalog-service
+    participant DB as hotelbooking
+
+    User->>UI: Chọn hotel + checkIn/checkOut, bấm Tìm kiếm
+    UI->>Gateway: GET /api/hotels/{hotelId}/availability?checkIn&checkOut + JWT
+    Gateway->>Catalog: GET /hotels/{hotelId}/availability + JWT
+    Catalog->>DB: Đọc room_type + room_inventory theo tenant và khoảng ngày
+    Note over DB: Chỉ trả loại phòng có tồn ở mọi đêm;<br/>không trả total/sold cho USER
+    DB-->>Catalog: Loại phòng, base_price mỗi đêm, available_rooms
+    Catalog-->>UI: 200 danh sách availability (có thể [])
+    UI-->>User: Hiển thị loại phòng và giá sau khi tìm kiếm
+```
+
+## Tạo booking giữ tồn
+
+```mermaid
+sequenceDiagram
+    actor User as USER A
     participant Gateway as api-gateway
     participant Booking as booking-service
     participant DB as hotelbooking
 
-    User->>Gateway: POST /api/bookings {roomId, checkIn, checkOut} + Bearer JWT
-    Gateway->>Booking: POST /bookings + Bearer JWT
-    Booking->>Booking: Kiểm tra JWT (401), role USER (403), body và thời gian (400)
-    Booking->>DB: INSERT booking (tenant_id và email lấy từ JWT, CONFIRMED)
-
-    alt Không vi phạm ràng buộc
-        DB-->>Booking: Đã lưu
-        Booking-->>User: 201 CONFIRMED
-    else excl_booking_room_overlap: đè giờ với booking khác
-        DB-->>Booking: Lỗi EXCLUDE (23P01)
-        Booking->>DB: Phòng có thuộc tenant của JWT không?
-        alt Có
-            DB-->>Booking: Có
-            Booking-->>User: 409, không tạo booking
-        else Không, không được lộ lịch của tenant khác
-            DB-->>Booking: Không
-            Booking-->>User: 404, không tạo booking
-        end
-    else fk_booking_room_same_tenant: phòng không có trong tenant
-        DB-->>Booking: Lỗi FK
-        Booking-->>User: 404, không tạo booking
-    else fk_booking_user_same_tenant hoặc booking_tenant_id_fkey: email hoặc tenant không hợp lệ
-        DB-->>Booking: Lỗi FK
-        Booking-->>User: 403, không tạo booking
-    else Lỗi khác
-        DB-->>Booking: Lỗi
-        Booking-->>User: 500, không lộ chi tiết SQL
+    User->>Gateway: POST /api/bookings {roomTypeId, checkIn, checkOut, roomCount} + JWT
+    Gateway->>Booking: POST /bookings + JWT
+    Booking->>Booking: Xác thực JWT (401), role (403), body/ngày (400)
+    Booking->>DB: BEGIN READ COMMITTED
+    Booking->>DB: Đọc room_type theo id + tenant_id để lấy base_price
+    Booking->>DB: UPDATE room_inventory từng đêm tăng dần, sold + roomCount <= total
+    alt Đủ tồn cho mọi đêm
+        Booking->>DB: INSERT booking PENDING_PAYMENT, chốt total_amount
+        Booking->>DB: COMMIT
+        Booking-->>User: 201 PENDING_PAYMENT + paymentExpiresAt
+    else Thiếu tồn hoặc thiếu dòng inventory ở một đêm
+        Booking->>DB: ROLLBACK toàn bộ thay đổi
+        Booking-->>User: 409 Conflict
+    else Loại phòng không tồn tại hoặc thuộc tenant khác
+        Booking->>DB: ROLLBACK
+        Booking-->>User: 404, không lộ dữ liệu tenant khác
     end
 ```
 
-## Hai request tranh một khoảng giờ
-
-Trong sơ đồ, request A thắng. Khi chạy thật, bên nào cũng có thể thắng, nhưng kết quả luôn là một 201 và một 409.
+## Thanh toán mô phỏng
 
 ```mermaid
 sequenceDiagram
-    actor A as Request A
-    actor B as Request B
+    actor User as USER là chủ booking
+    participant Gateway as api-gateway
     participant Booking as booking-service
     participant DB as hotelbooking
 
-    A->>Booking: POST /bookings {roomId:5, cùng khoảng giờ}
-    B->>Booking: POST /bookings {roomId:5, cùng khoảng giờ}
-    Booking->>DB: INSERT booking của A
-    Booking->>DB: INSERT booking của B
-    Note over DB: EXCLUDE xử lý nguyên tử:<br/>chỉ một INSERT được giữ lại
-    DB-->>Booking: A: đã lưu
-    DB-->>Booking: B: bị từ chối
-    Booking-->>A: 201 CONFIRMED
-    Booking-->>B: 409 Conflict
+    User->>Gateway: POST /api/bookings/{id}/payment + JWT
+    Gateway->>Booking: POST /bookings/{id}/payment + JWT
+    Booking->>DB: Đổi PENDING_PAYMENT thành CONFIRMED nếu chưa hết hạn
+    alt Đơn còn hạn
+        DB-->>Booking: Cập nhật đúng 1 dòng
+        Booking-->>User: 200 CONFIRMED
+        Note over DB: Tồn không đổi; CONFIRMED vẫn giữ phòng
+    else Trạng thái không hợp lệ hoặc đã hết hạn
+        Booking-->>User: 409; không đổi tồn
+    end
 ```
 
-## Xem booking
+## User huỷ khi đang chờ thanh toán
 
 ```mermaid
 sequenceDiagram
-    actor Client as USER hoặc ADMIN
+    actor A as USER A (chủ booking)
+    actor B as USER B
+    participant Gateway as api-gateway
+    participant Booking as booking-service
+    participant Catalog as catalog-service
+    participant DB as hotelbooking
+
+    A->>Gateway: POST /api/bookings/{id}/cancel + JWT
+    Gateway->>Booking: POST /bookings/{id}/cancel + JWT
+    Booking->>DB: BEGIN; đổi PENDING_PAYMENT thành CANCELLED có điều kiện
+    alt Đổi trạng thái đúng 1 dòng
+        Booking->>DB: Giảm sold cho từng đêm, trong cùng transaction
+        Booking->>DB: COMMIT
+        Booking-->>A: 200 CANCELLED
+    else Đơn không tồn tại/sai owner
+        Booking-->>A: 404
+    else Trạng thái không cho phép huỷ
+        Booking->>DB: ROLLBACK; không trả tồn
+        Booking-->>A: 409
+    end
+    B->>Gateway: GET availability cùng hotel và khoảng ngày + JWT
+    Gateway->>Catalog: GET availability
+    Catalog->>DB: Đọc tồn đã được trả
+    DB-->>Catalog: Loại phòng có available_rooms tăng lại
+    Catalog-->>B: 200, phòng xuất hiện nếu còn tồn ở mọi đêm
+```
+
+## Hai request đặt cùng tồn đồng thời
+
+```mermaid
+sequenceDiagram
+    actor A as USER A
+    actor B as USER B
     participant Booking as booking-service
     participant DB as hotelbooking
 
-    Client->>Booking: GET /bookings/{id} + Bearer JWT
-    alt role USER
-        Booking->>DB: Tìm theo id, tenant_id và user_email từ JWT
-    else role ADMIN
-        Booking->>DB: Tìm theo id và tenant_id từ JWT
-    end
-    alt Có bản ghi
-        DB-->>Booking: Booking
-        Booking-->>Client: 200
-    else Không có, khác tenant hoặc khác chủ
-        DB-->>Booking: Không có
-        Booking-->>Client: 404, không nói rõ lý do
-    end
+    A->>Booking: POST booking cùng roomType, ngày
+    B->>Booking: POST booking cùng roomType, ngày
+    Booking->>DB: A UPDATE inventory theo ngày tăng dần
+    Booking->>DB: B UPDATE cùng dòng, chờ khoá
+    DB-->>Booking: A tăng sold hợp lệ; ghi PENDING_PAYMENT; COMMIT
+    DB-->>Booking: B kiểm tra lại sold + roomCount > total
+    Booking-->>A: 201 PENDING_PAYMENT
+    Booking-->>B: 409; rollback mọi đêm đã cập nhật tạm
 ```
+
+## Các quy tắc trạng thái
+
+| Từ trạng thái | Thao tác | Sang trạng thái | Tồn kho |
+|---|---|---|---|
+| `PENDING_PAYMENT` | Thanh toán mô phỏng thành công trước hạn | `CONFIRMED` | Giữ nguyên |
+| `PENDING_PAYMENT` | User chủ đơn huỷ | `CANCELLED` | Trả đúng một lần |
+| `PENDING_PAYMENT` | Quá hạn thanh toán | `EXPIRED` | Trả đúng một lần |
+| `CONFIRMED` | Thử huỷ | `409` | Không đổi trạng thái hoặc tồn kho |
+| `CANCELLED` / `EXPIRED` | Thanh toán hoặc huỷ lại | Không đổi; thao tác không trả tồn lần nữa | Không đổi |
+
+User chỉ thấy booking của mình; Admin xem trong tenant. Chỉ Admin được gọi API kiểm kê tổng `total`/`sold`/`available`.

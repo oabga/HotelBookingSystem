@@ -11,7 +11,7 @@
 - Có **2 tenant**, 2 role `USER` và `ADMIN`. Một tenant có thể có nhiều khách sạn. `USER` tìm phòng, đặt, thanh toán mô phỏng và huỷ đơn của mình. `ADMIN` thêm loại phòng, sửa giá, xem tồn kho, xem và huỷ booking trong tenant mình. `ADMIN` **không** tạo hoặc thanh toán booking.
 - **Flow chính:** khách chọn khách sạn, ngày nhận và trả phòng, bấm Tìm kiếm; hệ thống đọc `room_type` và `room_inventory`, rồi chỉ trả về các loại phòng còn trống ở mọi đêm trong kỳ ở.
 - Đơn vị bán là **loại phòng theo từng đêm**, không phải phòng cụ thể. Kỳ ở là khoảng ngày `[checkIn, checkOut)`: tính đêm `checkIn`, không tính đêm `checkOut`.
-- Đặt phòng tạo đơn `PENDING_PAYMENT` và **trừ tồn ngay**. Thanh toán mô phỏng chuyển đơn sang `CONFIRMED`. Huỷ hoặc quá hạn thanh toán sẽ trả phòng. Trừ tồn và ghi đơn nằm trong một transaction; `CHECK (sold <= total)` của database bảo đảm không bán quá số phòng.
+- Đặt phòng tạo đơn `PENDING_PAYMENT` và **trừ tồn ngay**. Thanh toán mô phỏng chuyển đơn sang `CONFIRMED`. User chủ đơn huỷ khi còn `PENDING_PAYMENT` sẽ chuyển sang `CANCELLED` và trả tồn; quá hạn chuyển `EXPIRED` và cũng trả tồn. Trừ/hoàn tồn và ghi/cập nhật booking nằm trong cùng transaction.
 - **Booking không gọi HTTP sang Catalog.** Hai service dùng chung database `hotelbooking`: Catalog tạo `room_inventory` và sửa `total`, Booking chỉ sửa `sold`.
 - **Không triển khai** cổng thanh toán thật, hoàn tiền, notification/push, idempotency key, refresh/revocation, xếp phòng cụ thể, giá theo ngày, UI đầy đủ hay message broker.
 - **Owner:** **A (Bảo)** — IAM/JWT/PKCE/Gateway/CORS/root platform; **B (Hòa)** — Catalog (`hotel`, `room_type`, `room_inventory`); **C (Phúc)** — Booking; **D (Đạt)** — hai frontend demo, `docs/demo.http`, kiểm thử E2E, tài liệu/bằng chứng. D chỉ đề xuất/review contract, không tự sửa service của A/B/C.
@@ -57,7 +57,7 @@ Gateway **bỏ đúng một tiền tố `/api`** bằng `StripPrefix=1` (hoặc 
 | `GET /api/bookings` | `GET /bookings` | `USER`, `ADMIN` | 200 | 401 | C |
 | `GET /api/bookings/{id}` | `GET /bookings/{id}` | `USER`, `ADMIN` | 200 | 400, 404 | C |
 | `POST /api/bookings/{id}/payment` | `POST /bookings/{id}/payment` | `USER` là chủ đơn | 200 | 400, 403, 404, 409 | C |
-| `POST /api/bookings/{id}/cancel` | `POST /bookings/{id}/cancel` | `USER` là chủ đơn, `ADMIN` cùng tenant | 200 | 400, 404, 409 | C |
+| `POST /api/bookings/{id}/cancel` | `POST /bookings/{id}/cancel` | `USER` là chủ đơn | 200 | 400, 404, 409 | C |
 
 | Direct call (không qua Gateway) | Người gọi | Quyền/yêu cầu | Thành công | Lỗi chính | Owner |
 |---|---|---|---|---|---|
@@ -73,11 +73,11 @@ Tất cả business API yêu cầu JWT hợp lệ; ngoài lỗi được liệt 
 
 | HTTP | Ý nghĩa | Response body |
 |---|---|---|
-| **400** | ID không nguyên dương, body thiếu/sai kiểu, tham số ngày sai, `roomCount`/`basePrice`/`code`/`name`/`capacity`/`totalRooms` sai | `application/problem+json` |
+| **400** | ID không nguyên dương, body thiếu/sai kiểu, tham số ngày sai, `roomCount`/`basePrice`/`name`/`capacity`/`totalRooms` sai | `application/problem+json` |
 | **401** | Thiếu, sai chữ ký, issuer sai, token hết hạn, thiếu/malformed JWT claim bắt buộc | Không ràng buộc JSON; chỉ kiểm tra status |
 | **403** | JWT hợp lệ nhưng role không đủ; hoặc email/tenant trong JWT không khớp `app_user` khi tạo booking | Không ràng buộc JSON; chỉ kiểm tra status |
 | **404** | Bản ghi không tồn tại, thuộc tenant khác hoặc booking của user khác | `application/problem+json` |
-| **409** | Có đêm hết phòng hoặc chưa mở bán; `code` loại phòng đã có trong khách sạn; trạng thái đơn không cho phép thao tác | `application/problem+json` |
+| **409** | Có đêm hết phòng hoặc chưa mở bán; trạng thái đơn không cho phép thao tác | `application/problem+json` |
 | **500** | Lỗi nội bộ, ví dụ database không truy cập được | `application/problem+json` khi có thể |
 
 Định dạng lỗi Spring `ProblemDetail` ví dụ cho **404**:
@@ -199,7 +199,7 @@ Ví dụ phản hồi JWKS (các giá trị khóa minh họa):
 | `id` | integer > 0 | ID khách sạn |
 | `tenantId` | integer > 0 | Trùng tenant trong JWT, chỉ để hiển thị/đối chiếu |
 | `name` | string | Tên khách sạn |
-| `city` | string | Thành phố |
+| `address` | string | Địa chỉ khách sạn |
 
 **`RoomType`**
 
@@ -208,10 +208,9 @@ Ví dụ phản hồi JWKS (các giá trị khóa minh họa):
 | `id` | integer > 0 | ID loại phòng |
 | `tenantId` | integer > 0 | Trùng tenant trong JWT |
 | `hotelId` | integer > 0 | Khách sạn chứa loại phòng |
-| `code` | string | Duy nhất trong một khách sạn, ví dụ `STD` |
 | `name` | string | Tên hiển thị |
 | `capacity` | integer > 0 | Số khách mỗi phòng |
-| `basePrice` | number | Giá mỗi đêm, VND |
+| `basePrice` | number | Giá của loại phòng cho một phòng mỗi đêm, VND |
 | `totalRooms` | integer > 0 | Số phòng mặc định khi tạo dòng tồn |
 
 Ví dụ `RoomType`:
@@ -221,7 +220,6 @@ Ví dụ `RoomType`:
   "id": 1,
   "tenantId": 1,
   "hotelId": 1,
-  "code": "STD",
   "name": "Standard",
   "capacity": 2,
   "basePrice": 500000.00,
@@ -253,7 +251,6 @@ Response **200**, theo `roomTypeId` tăng dần:
 [
   {
     "roomTypeId": 1,
-    "code": "STD",
     "name": "Standard",
     "capacity": 2,
     "pricePerNight": 500000.00,
@@ -286,7 +283,6 @@ Kết quả tìm kiếm có thể cũ ngay sau khi trả về, nên `POST /api/b
 
 ```json
 {
-  "code": "SUI",
   "name": "Suite",
   "capacity": 4,
   "basePrice": 2500000.00,
@@ -296,7 +292,6 @@ Kết quả tìm kiếm có thể cũ ngay sau khi trả về, nên `POST /api/b
 
 | Trường | Quy tắc, sai thì **400** |
 |---|---|
-| `code` | Chuỗi 1–20 ký tự, chỉ gồm `A-Z`, `0-9`, `_` |
 | `name` | Chuỗi 1–100 ký tự sau trim, không blank |
 | `capacity` | Số nguyên JSON từ 1 đến 20 |
 | `basePrice` | JSON number `> 0` và `≤ 99999999.99`, tối đa 2 decimal |
@@ -305,7 +300,7 @@ Kết quả tìm kiếm có thể cũ ngay sau khi trả về, nên `POST /api/b
 - Không nhận tenant từ client; `tenant_id` lấy từ JWT. Trường `tenantId` lạ nếu bị gửi thêm cũng **không có tác dụng**.
 - Trong **cùng một transaction**, Catalog thêm loại phòng và tạo một dòng `room_inventory` cho mỗi đêm từ hôm nay đến hết khoảng mở bán (`total = totalRooms`, `sold = 0`). Thiếu bước này thì loại phòng không bao giờ hiện trong kết quả tìm kiếm.
 - **201** + `RoomType`.
-- `USER` gọi dù body đúng hay sai → **403**. Khách sạn không có trong tenant → **404**. `code` đã có trong khách sạn → **409**, không tạo gì.
+- `USER` gọi dù body đúng hay sai → **403**. Khách sạn không có trong tenant → **404**. Không kiểm tra mã `code` vì `room_type` không có trường này.
 
 ### 4.5 `PUT /api/room-types/{id}/price` → `PUT /room-types/{id}/price`
 
@@ -331,8 +326,8 @@ Response **200**, theo `roomTypeId` rồi `stayDate` tăng dần. Đêm chưa m�
 
 ```json
 [
-  {"roomTypeId": 1, "code": "STD", "name": "Standard", "stayDate": "2026-11-24", "total": 3, "sold": 1, "available": 2},
-  {"roomTypeId": 1, "code": "STD", "name": "Standard", "stayDate": "2026-11-25", "total": 3, "sold": 2, "available": 1}
+  {"roomTypeId": 1, "name": "Standard", "stayDate": "2026-11-24", "total": 3, "sold": 1, "available": 2},
+  {"roomTypeId": 1, "name": "Standard", "stayDate": "2026-11-25", "total": 3, "sold": 2, "available": 1}
 ]
 ```
 
@@ -453,11 +448,12 @@ Thanh toán mô phỏng, luôn được coi là thành công, không có body v�
 
 ### 5.6 `POST /api/bookings/{id}/cancel` → `POST /bookings/{id}/cancel`
 
-`USER` huỷ đơn của mình, hoặc `ADMIN` huỷ đơn trong tenant. Không có body. Đổi trạng thái có điều kiện trước, **chỉ khi đổi được đúng 1 dòng** mới trả phòng từng đêm theo ngày tăng dần, trong cùng một transaction (`erd-v2.md` §6).
+Chỉ `USER` là chủ đơn được huỷ. Không có body. Trong flow demo, chỉ booking `PENDING_PAYMENT` được huỷ; đổi trạng thái có điều kiện trước, **chỉ khi đổi được đúng 1 dòng** mới trả phòng từng đêm theo ngày tăng dần, trong cùng một transaction (`erd-v2.md` §6).
 
 | Trạng thái đơn | Kết quả | `room_inventory` |
 |---|---|---|
-| `PENDING_PAYMENT`, `CONFIRMED` | **200** + Booking `CANCELLED` | Trả `roomCount` cho mỗi đêm |
+| `PENDING_PAYMENT` | **200** + Booking `CANCELLED` | Trả `roomCount` cho mỗi đêm trong cùng transaction |
+| `CONFIRMED` | **409** | Demo chỉ cho huỷ khi đang chờ thanh toán |
 | `CANCELLED` (huỷ lại) | **200** + Booking `CANCELLED` | **Không đổi** |
 | `EXPIRED` | **409** | Không đổi |
 
@@ -510,9 +506,9 @@ ID dưới đây theo thứ tự seed trong migration và **chỉ đúng trên D
 | Role | `USER`, `ADMIN` | A |
 | Booking status | `PENDING_PAYMENT`, `CONFIRMED`, `CANCELLED`, `EXPIRED` | C |
 
-| ID loại phòng | Tenant | Khách sạn | `code` | `basePrice` | `totalRooms` | Dùng cho |
+| ID loại phòng | Tenant | Khách sạn | `basePrice` mỗi đêm | `totalRooms` | Dùng cho |
 |---|---|---|---|---|---|---|
-| `1` | 1 | 1 | `STD` | 500,000 | 3 | Happy path |
+| `1` | 1 | 1 | 500,000 | 3 | Happy path |
 | `2` | 1 | 1 | `DLX` | 900,000 | 4 | Happy path, kiểm thử hết phòng |
 | `3` | 2 | 2 | `STD` | 450,000 | 5 | Kiểm thử khác tenant |
 | `4` | 2 | 2 | `DLX` | 850,000 | 6 | Kiểm thử khác tenant |
@@ -664,14 +660,14 @@ G2 chỉ **PASS khi tất cả mục sau hoàn thành**:
 
 **Giá trị do bản này đề xuất, cần nhóm xác nhận:** giữ phòng 15 phút, job hết hạn 60 giây, kỳ ở tối đa 30 đêm, 1–10 phòng mỗi đơn, mở bán đến `2027-01-31`, giới hạn trường ở §4.4.
 
-**Mục chưa khớp bản này, owner cần sửa:**
+**Các phần cũ đã được thay bằng hợp đồng hiện hành ở trên:**
 
 | Tài liệu hoặc code | Chưa khớp | Owner |
 |---|---|---|
-| `iam-google-sso-demo-plan-v2.md` | §1.2 ghi không làm `room_inventory`; `/api/rooms/search`, `guestCount`, `roomType`, `/api/admin/rooms/**`, `PUT /api/admin/bookings/{id}/room`, `operational_status`, booking theo giờ; bảng `users` và cột `email` trong khi migration dùng `app_user` và `user_email` | A |
-| Migration và code Catalog | Chưa có `hotel`, `room_type`, `room_inventory` và các API §4 | B |
-| Migration và code Booking, `booking-policy.md`, `sequence-booking.md`, `booking-service/README.md` | Vẫn theo bản 2.0 | C |
-| `api-gateway/application.yml` | Vẫn có route `/api/rooms/**`, thiếu 3 route mới | A |
+| `iam-google-sso-demo-plan-v2.md` | Các mô tả cũ về room vật lý/booking theo giờ trong phần roadmap và sơ đồ phụ lục đã được ghi rõ là nội dung thay thế; schema/API chuẩn nằm ở §4–5 của plan | A/C |
+| `booking-policy.md`, `sequence-booking.md` | Đã đồng bộ với giữ tồn theo đêm, huỷ `PENDING_PAYMENT` và trả tồn | C |
+| `erd-v2.md` | Đã đồng bộ `hotel.address`, bỏ `room_type.code`, ghi rõ giá mỗi phòng/đêm và huỷ `PENDING_PAYMENT` | B/C |
+| `booking-service/README.md`, code và migration | Cần được đối chiếu khi triển khai contract hiện hành theo đêm | B/C |
 | Frontend, `docs/demo.http` | Theo API mới | D |
 
 **Nguyên tắc cuối:** việc ký G2 và việc API chạy đúng vẫn cần xác nhận, triển khai và kiểm thử thực tế. Sau khi ký, chỉ đổi contract bằng PR có bên cung cấp **và** bên sử dụng API review.
