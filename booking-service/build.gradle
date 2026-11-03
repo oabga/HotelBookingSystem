@@ -2,6 +2,9 @@ plugins {
     id 'buildlogic.java-application-conventions'
 }
 
+// Testcontainers 1.19.8 của Boot 3.3.5 không kết nối được Docker Engine 29 (API tối thiểu 1.44).
+ext['testcontainers.version'] = '1.21.4'
+
 dependencies {
     implementation project(':common-security')
 
@@ -10,6 +13,8 @@ dependencies {
     implementation 'org.flywaydb:flyway-core'
     implementation 'org.flywaydb:flyway-database-postgresql'
     runtimeOnly 'org.postgresql:postgresql'
+
+    testImplementation 'org.springframework.security:spring-security-test'
 }
 
 application {
