@@ -16,7 +16,7 @@ sequenceDiagram
     UI->>Gateway: GET /api/hotels/{hotelId}/availability?checkIn&checkOut + JWT
     Gateway->>Catalog: GET /hotels/{hotelId}/availability + JWT
     Catalog->>DB: Đọc room_type + room_inventory theo tenant và khoảng ngày
-    Note over DB: Chỉ trả loại phòng có tồn ở mọi đêm;<br/>không trả total/sold cho USER
+    Note over DB: Chỉ trả loại phòng có tồn ở mọi đêm — không trả total hoặc sold cho USER
     DB-->>Catalog: Loại phòng, base_price mỗi đêm, available_rooms
     Catalog-->>UI: 200 danh sách availability (có thể [])
     UI-->>User: Hiển thị loại phòng và giá sau khi tìm kiếm
@@ -26,27 +26,27 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    actor User as USER A
+    actor A as USER_A
     participant Gateway as api-gateway
     participant Booking as booking-service
     participant DB as hotelbooking
 
-    User->>Gateway: POST /api/bookings {roomTypeId, checkIn, checkOut, roomCount} + JWT
+    A->>Gateway: POST /api/bookings {roomTypeId, checkIn, checkOut, roomCount} + JWT
     Gateway->>Booking: POST /bookings + JWT
     Booking->>Booking: Xác thực JWT (401), role (403), body/ngày (400)
     Booking->>DB: BEGIN READ COMMITTED
     Booking->>DB: Đọc room_type theo id + tenant_id để lấy base_price
-    Booking->>DB: UPDATE room_inventory từng đêm tăng dần, sold + roomCount <= total
+    Booking->>DB: UPDATE room_inventory từng đêm tăng dần, sold + roomCount ≤ total
     alt Đủ tồn cho mọi đêm
         Booking->>DB: INSERT booking PENDING_PAYMENT, chốt total_amount
         Booking->>DB: COMMIT
-        Booking-->>User: 201 PENDING_PAYMENT + paymentExpiresAt
+        Booking-->>A: 201 PENDING_PAYMENT + paymentExpiresAt
     else Thiếu tồn hoặc thiếu dòng inventory ở một đêm
         Booking->>DB: ROLLBACK toàn bộ thay đổi
-        Booking-->>User: 409 Conflict
+        Booking-->>A: 409 Conflict
     else Loại phòng không tồn tại hoặc thuộc tenant khác
         Booking->>DB: ROLLBACK
-        Booking-->>User: 404, không lộ dữ liệu tenant khác
+        Booking-->>A: 404, không lộ dữ liệu tenant khác
     end
 ```
 
@@ -54,20 +54,20 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    actor User as USER là chủ booking
+    actor Owner as BOOKING_OWNER
     participant Gateway as api-gateway
     participant Booking as booking-service
     participant DB as hotelbooking
 
-    User->>Gateway: POST /api/bookings/{id}/payment + JWT
+    Owner->>Gateway: POST /api/bookings/{id}/payment + JWT
     Gateway->>Booking: POST /bookings/{id}/payment + JWT
     Booking->>DB: Đổi PENDING_PAYMENT thành CONFIRMED nếu chưa hết hạn
     alt Đơn còn hạn
         DB-->>Booking: Cập nhật đúng 1 dòng
-        Booking-->>User: 200 CONFIRMED
-        Note over DB: Tồn không đổi; CONFIRMED vẫn giữ phòng
+        Booking-->>Owner: 200 CONFIRMED
+        Note over DB: Tồn không đổi — CONFIRMED vẫn giữ phòng
     else Trạng thái không hợp lệ hoặc đã hết hạn
-        Booking-->>User: 409; không đổi tồn
+        Booking-->>Owner: 409 — không đổi tồn
     end
 ```
 
@@ -75,8 +75,8 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    actor A as USER A (chủ booking)
-    actor B as USER B
+    actor A
+    actor B
     participant Gateway as api-gateway
     participant Booking as booking-service
     participant Catalog as catalog-service
@@ -84,7 +84,7 @@ sequenceDiagram
 
     A->>Gateway: POST /api/bookings/{id}/cancel + JWT
     Gateway->>Booking: POST /bookings/{id}/cancel + JWT
-    Booking->>DB: BEGIN; đổi PENDING_PAYMENT thành CANCELLED có điều kiện
+    Booking->>DB: BEGIN — đổi PENDING_PAYMENT thành CANCELLED có điều kiện
     alt Đổi trạng thái đúng 1 dòng
         Booking->>DB: Giảm sold cho từng đêm, trong cùng transaction
         Booking->>DB: COMMIT
@@ -92,7 +92,7 @@ sequenceDiagram
     else Đơn không tồn tại/sai owner
         Booking-->>A: 404
     else Trạng thái không cho phép huỷ
-        Booking->>DB: ROLLBACK; không trả tồn
+        Booking->>DB: ROLLBACK — không trả tồn
         Booking-->>A: 409
     end
     B->>Gateway: GET availability cùng hotel và khoảng ngày + JWT
@@ -106,8 +106,8 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    actor A as USER A
-    actor B as USER B
+    actor A
+    actor B
     participant Booking as booking-service
     participant DB as hotelbooking
 
@@ -115,10 +115,10 @@ sequenceDiagram
     B->>Booking: POST booking cùng roomType, ngày
     Booking->>DB: A UPDATE inventory theo ngày tăng dần
     Booking->>DB: B UPDATE cùng dòng, chờ khoá
-    DB-->>Booking: A tăng sold hợp lệ; ghi PENDING_PAYMENT; COMMIT
+    DB-->>Booking: A tăng sold hợp lệ — ghi PENDING_PAYMENT — COMMIT
     DB-->>Booking: B kiểm tra lại sold + roomCount > total
     Booking-->>A: 201 PENDING_PAYMENT
-    Booking-->>B: 409; rollback mọi đêm đã cập nhật tạm
+    Booking-->>B: 409 — rollback mọi đêm đã cập nhật tạm
 ```
 
 ## Các quy tắc trạng thái

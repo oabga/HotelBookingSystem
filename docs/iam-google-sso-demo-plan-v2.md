@@ -58,21 +58,22 @@
 
 ## 2. Kiến trúc, thành phần, công nghệ
 
-```text
-HTML App 1 :3000 ─┐
-                  ├─ login ─> iam-service :8084 ── OAuth2 Code + PKCE S256 ──> Google
-HTML App 2 :3001 ─┘                    │
-          │                            └─ JWT RS256 / JWKS
-          └── Bearer JWT ──> api-gateway :8080
-                                 ├── /api/rooms/search/** ──> catalog-service :8081 ─┐
-                                 ├── /api/admin/rooms/** ──> catalog-service :8081 ──┤── 1 database Postgres chung "hotelbooking"
-                                 └── /api/bookings/** ──> booking-service :8082 ─────┘
-
-api-gateway, catalog-service, booking-service xác minh JWT từ JWKS của iam-service.
-iam-service, catalog-service, booking-service dùng CHUNG 1 database "hotelbooking" (1 schema `public`),
-có FK thật giữa bảng `tenant`/`users` (IAM) ↔ `room` (Catalog) ↔ `booking` (Booking). Mỗi service vẫn chỉ tự
-quản lý migration cho bảng của mình (ranh giới ownership giữ nguyên), chỉ khác là không tách DB vật lý.
+```mermaid
+flowchart LR
+    App1["HTML App 1 :3000"] -->|Login| IAM["iam-service :8084"]
+    App2["HTML App 2 :3001"] -->|Login| IAM
+    IAM -->|OAuth2 Code and PKCE S256| Google["Google"]
+    IAM -->|JWT RS256 and JWKS| Gateway["api-gateway :8080"]
+    App1 -->|Bearer JWT| Gateway
+    App2 -->|Bearer JWT| Gateway
+    Gateway -->|Hotels, room types, admin inventory| Catalog["catalog-service :8081"]
+    Gateway -->|Bookings| Booking["booking-service :8082"]
+    IAM --> DB[("Postgres hotelbooking")]
+    Catalog --> DB
+    Booking --> DB
 ```
+
+Gateway, Catalog và Booking xác minh JWT dựa trên JWKS của IAM. IAM, Catalog và Booking dùng chung database `hotelbooking`, schema `public`. Các bảng tenant, app_user, hotel, room_type, room_inventory và booking có FK tương ứng; mỗi service sở hữu migration cho bảng của mình.
 
 | Thành phần | Owner | Mục đích | Chú ý |
 |---|---|---|---|
@@ -81,7 +82,7 @@ quản lý migration cho bảng của mình (ranh giới ownership giữ nguyên
 | `common-security` | A | Verify JWT, role, `TenantContext` | Module thư viện, không chạy như service |
 | `api-gateway` :8080 | A | Forward API có Bearer token | Không route `/internal/**` |
 | `catalog-service` :8081 | B | Tìm phòng theo lựa chọn/thời gian, quản lý phòng và inventory Admin | DB chung, dữ liệu theo tenant |
-| `booking-service` :8082 | C | Tạo booking giữ giờ, thanh toán mô phỏng, xem/huỷ booking | DB chung, sở hữu booking và chống overlap |
+| `booking-service` :8082 | C | Tạo booking giữ tồn theo đêm, thanh toán mô phỏng, xem/huỷ booking | DB chung, cập nhật inventory và booking trong transaction |
 | HTML App 1 :3000 và App 2 :3001 | D | Chứng minh SSO, gọi API/role | HTML/JS tối giản, không framework UI mới |
 | `docs/demo.http`, test manual, diagrams và README demo | D chủ trì | Bằng chứng trình diễn, tích hợp | A/B/C cung cấp response, test report và sơ đồ của mình |
 
@@ -89,11 +90,11 @@ quản lý migration cho bảng của mình (ranh giới ownership giữ nguyên
 
 **Version gate trước khi code:** A xác minh phiên bản Spring Boot / Spring Security / Spring Cloud (nếu có dùng) / Gradle wrapper tương thích. **Không tự nâng cấp toàn repo chỉ vì thấy có phiên bản mới hơn**; ghi phiên bản khóa trong `docs/decisions.md`, chạy `./gradlew build` được rồi mới yêu cầu các service cùng tuân thủ.
 
-**Cơ sở dữ liệu:** một PostgreSQL server local, **1 database chung** `hotelbooking`, 1 schema `public`. Có FK thật giữa tenant/users/room/booking và FK ghép để chặn room/user sai tenant. Booking giữ `check_in`/`check_out`; constraint DB chặn hai booking active cùng phòng bị overlap (xem `docs/erd-v2.md`).
+**Cơ sở dữ liệu:** một PostgreSQL server local, **1 database chung** `hotelbooking`, 1 schema `public`. Có FK thật giữa `tenant`, `app_user`, `hotel`, `room_type`, `room_inventory` và `booking`; FK ghép chặn tham chiếu chéo tenant. Booking giữ kỳ ở theo ngày và cập nhật tồn từng đêm theo `docs/erd-v2.md`.
 
-Mỗi service **vẫn chỉ sở hữu và chạy migration cho bảng của mình** (A: `tenant`, `users`; B: `room`; C: `booking`). Để 3 bộ Flyway độc lập không đụng version, mỗi service dùng riêng `spring.flyway.table` (`flyway_schema_history_iam`, `flyway_schema_history_catalog`, `flyway_schema_history_booking`). Tên bảng vật lý `users` đại diện cho user; tránh dùng tên `user` vì đó là từ khóa SQL.
+Mỗi service **vẫn chỉ sở hữu và chạy migration cho bảng của mình** (A: `tenant`, `app_user`; B: `hotel`, `room_type`, `room_inventory`; C: `booking`). Để 3 bộ Flyway độc lập không đụng version, mỗi service dùng riêng `spring.flyway.table` (`flyway_schema_history_iam`, `flyway_schema_history_catalog`, `flyway_schema_history_booking`). Dùng tên bảng vật lý `app_user`; tránh dùng tên `user` vì đó là từ khóa SQL.
 
-**Phụ thuộc thứ tự migration:** `iam-service` tạo `tenant`/`users` trước, `catalog-service` tạo `room` tiếp theo, rồi `booking-service` tạo `booking` vì có FK tới các bảng trên.
+**Phụ thuộc thứ tự migration:** `iam-service` tạo `tenant`/`app_user` trước, `catalog-service` tạo `hotel`/`room_type`/`room_inventory` tiếp theo, rồi `booking-service` tạo `booking` vì có FK tới các bảng trên.
 
 ---
 
@@ -457,107 +458,87 @@ sequenceDiagram
     IAM-->>App2: Redirect app2/callback, JWT hợp lệ trong URL fragment
 ```
 
-### A2. Tenant isolation và phân quyền phòng
+### A2. Tìm kiếm, quyền Admin và inventory theo đêm
 
 ```mermaid
 sequenceDiagram
-    participant UI as HTML App
-    participant Gateway as api-gateway
-    participant Catalog as catalog-service
-    participant DB as hotelbooking (room)
+    participant UI
+    participant Gateway
+    participant Catalog
+    participant DB
 
-    UI->>Gateway: GET /api/rooms/search?checkIn&checkOut&guestCount (Bearer JWT)
-    Gateway->>Gateway: Verify JWT
-    Gateway->>Catalog: GET /rooms/search + Bearer JWT
-    Catalog->>Catalog: Verify JWT, extract tenant_id
-    Catalog->>DB: SELECT ACTIVE rooms tenant + criteria, exclude overlapping active bookings
-    DB-->>Catalog: Rooms trống trong khoảng giờ đó
-    Catalog-->>UI: 200 results with status=AVAILABLE
+    UI->>Gateway: GET availability theo hotel, ngày và JWT
+    Gateway->>Catalog: Chuyển tiếp availability
+    Catalog->>DB: Đọc hotel, room_type, room_inventory theo tenant
+    DB-->>Catalog: Tồn từng đêm và giá mỗi phòng mỗi đêm
+    Catalog-->>UI: 200 loại phòng còn đủ tồn
 
-    UI->>Gateway: PUT /api/rooms/{id}/price (Bearer JWT)
-    Gateway->>Catalog: PUT /rooms/{id}/price + Bearer JWT
-    alt USER không có quyền
-        Catalog-->>UI: 403
-    else ADMIN
-        Catalog->>DB: UPDATE room WHERE id=? AND tenant_id=?
-        alt Không có room trong tenant
-            Catalog-->>UI: 404
-        else Update thành công
-            Catalog-->>UI: 200
-        end
-    end
-
-    UI->>Gateway: GET /api/admin/rooms/summary (Bearer JWT)
-    Gateway->>Catalog: Forward request + JWT
-    alt USER
+    UI->>Gateway: GET inventory Admin + JWT
+    Gateway->>Catalog: Chuyển tiếp inventory
+    alt Caller là USER
         Catalog-->>UI: 403 Forbidden
-    else ADMIN
-        Catalog->>DB: Count total/maintenance/available/booked for requested time window
-        Catalog-->>UI: 200 tenant room inventory summary
+    else Caller là ADMIN
+        Catalog->>DB: Đọc total, sold, available theo từng đêm
+        Catalog-->>UI: 200 inventory trong tenant
     end
 ```
 
-### A3. Hai yêu cầu cùng tranh một phòng trong cùng khoảng giờ
+### A3. Hai yêu cầu cùng tranh tồn kho
 
 ```mermaid
 sequenceDiagram
-    participant U1 as User / Request A
-    participant U2 as User / Request B
-    participant Gateway as api-gateway
-    participant Booking as booking-service
-    participant BookingDB as hotelbooking (booking)
+    participant A as Request_A
+    participant B as Request_B
+    participant Booking
+    participant DB
 
-    U1->>Gateway: POST /api/bookings {roomId, checkIn, checkOut}
-    U2->>Gateway: POST /api/bookings {roomId, checkIn, checkOut}
-    Gateway->>Booking: Forward A + Bearer JWT
-    Gateway->>Booking: Forward B + Bearer JWT
-    Booking->>BookingDB: INSERT A status PENDING_PAYMENT
-    Booking->>BookingDB: INSERT B status PENDING_PAYMENT
-    Note over Booking,BookingDB: Exclusion constraint: chỉ một booking active được giữ cùng room/time
-    BookingDB-->>Booking: A: inserted / B: overlap violation
-    Booking-->>Gateway: A: 201 PENDING_PAYMENT / B: 409
-    Gateway-->>U1: 201 PENDING_PAYMENT
-    Gateway-->>U2: 409 Conflict
+    A->>Booking: POST booking cùng roomType và kỳ ở
+    B->>Booking: POST booking cùng roomType và kỳ ở
+    Booking->>DB: A cập nhật sold từng đêm theo thứ tự ngày
+    Booking->>DB: B cập nhật cùng dòng tồn và chờ transaction A
+    DB-->>Booking: A giữ đủ tồn, tạo PENDING_PAYMENT, COMMIT
+    DB-->>Booking: B kiểm tra lại và không đủ tồn
+    Booking-->>A: 201 PENDING_PAYMENT
+    Booking-->>B: 409 — rollback toàn bộ
 ```
 
-**Lưu ý sơ đồ A3:** request nào thắng cũng được; tổng phải là 1 booking `PENDING_PAYMENT` và 1 lỗi `409`. Booking đang chờ thanh toán đã giữ phòng.
+Request nào thắng cũng được; kết quả phải có một booking `PENDING_PAYMENT` và một lỗi `409`. Booking đang chờ thanh toán đã giữ tồn.
 
-### A4. A pending/cancel và kết quả tìm kiếm của B
+### A4. Huỷ booking đang chờ thanh toán và tìm kiếm lại
 
 ```mermaid
 sequenceDiagram
-    participant A as User A
-    participant B as User B
-    participant Gateway as api-gateway
-    participant Catalog as catalog-service
-    participant Booking as booking-service
-    participant DB as hotelbooking database
+    participant A as User_A
+    participant B as User_B
+    participant Gateway
+    participant Booking
+    participant Catalog
+    participant DB
 
-    A->>Gateway: Search criteria + time window
-    Gateway->>Catalog: Search rooms
-    Catalog->>DB: Find room with no overlapping active booking
-    DB-->>A: Room R status AVAILABLE
-    A->>Gateway: POST booking R + checkIn/checkOut
-    Gateway->>Booking: Create PENDING_PAYMENT
-    Booking->>DB: INSERT active booking (holds time window)
-    DB-->>Booking: Created
-    Booking-->>A: 201 PENDING_PAYMENT / proceed to payment
+    A->>Gateway: Tìm kiếm hotel và kỳ ở
+    Gateway->>Catalog: Availability request
+    Catalog->>DB: Đọc tồn theo từng đêm
+    DB-->>A: Loại phòng còn tồn
 
-    B->>Gateway: Search same criteria + time window
-    Gateway->>Catalog: Search rooms
-    Catalog->>DB: Exclude R because A has PENDING_PAYMENT overlap
-    DB-->>B: R not in results
+    A->>Gateway: POST booking roomTypeId, ngày, roomCount
+    Gateway->>Booking: Tạo PENDING_PAYMENT
+    Booking->>DB: Tăng sold từng đêm và INSERT booking cùng transaction
+    DB-->>A: 201 PENDING_PAYMENT
 
-    A->>Gateway: POST /api/bookings/{id}/cancel
-    Gateway->>Booking: Verify owner and cancel
-    Booking->>DB: UPDATE status = CANCELLED
-    DB-->>Booking: Updated; active time hold released
-    Booking-->>A: 200 CANCELLED
+    B->>Gateway: Tìm kiếm cùng hotel và kỳ ở
+    Gateway->>Catalog: Availability request
+    Catalog->>DB: Đọc tồn sau khi A giữ phòng
+    DB-->>B: Loại phòng bị ẩn nếu không đủ tồn
 
-    B->>Gateway: Search same criteria + time window again
-    Gateway->>Catalog: Search rooms
-    Catalog->>DB: R has no overlapping active booking
-    DB-->>B: Room R status AVAILABLE
+    A->>Gateway: POST cancel booking
+    Gateway->>Booking: Xác thực chủ đơn và trạng thái PENDING_PAYMENT
+    Booking->>DB: Đổi CANCELLED rồi giảm sold cùng transaction
+    DB-->>A: 200 CANCELLED
+
+    B->>Gateway: Tìm kiếm lại cùng hotel và kỳ ở
+    Gateway->>Catalog: Availability request
+    Catalog->>DB: Đọc tồn đã được trả
+    DB-->>B: Loại phòng xuất hiện lại nếu còn đủ tồn
 ```
 
-Kết quả của lần tìm kiếm đầu tiên không được cache thành quyền đặt. Khi A huỷ, search mới của B sẽ tính lại availability cho đúng khoảng giờ.
+Kết quả tìm kiếm không phải quyền giữ phòng. Khi A huỷ hợp lệ, lần tìm kiếm mới của B tính lại availability từ inventory đã cập nhật.
