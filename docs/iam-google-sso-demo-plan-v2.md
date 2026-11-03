@@ -19,7 +19,9 @@
 3. **Minh chứng SSO tối thiểu trên 2 trang HTML ở 2 origin/port khác nhau**, cùng dùng `iam-service`/phiên Google trong **cùng browser profile**; đăng nhập trang 1 rồi vào trang 2 không phải nhập lại mật khẩu. Không xây frontend booking đầy đủ.
 4. **Phân công lại thành viên D**: chủ trì 2 trang HTML demo, bộ request kiểm thử tích hợp, kịch bản trình diễn, tổng hợp diagram và evidence. D **không** còn phụ trách `notification-service`.
 
-**Giữ nguyên việc tối giản từ bản v1:** một phòng có cờ `available` (không tồn kho theo ngày), đặt phòng thành công là `CONFIRMED` ngay; không thanh toán, không hủy, không notification, không idempotency-key, không PKCE public-client riêng ở frontend, không xây website hoàn chỉnh.
+**Flow phòng và booking:** user chọn đủ tiêu chí (ngày/giờ nhận-trả, số khách, loại phòng nếu có) rồi bấm **Tìm kiếm** mới thấy phòng phù hợp. `room.operational_status` là `ACTIVE`/`MAINTENANCE`; response tìm kiếm có `status=AVAILABLE` nếu không có booking overlap, nếu có thì `BOOKED`. Booking `PENDING_PAYMENT` giữ khoảng giờ ngay; khi thanh toán thành công thành `CONFIRMED`; khi huỷ hoặc hết hạn thanh toán không còn giữ phòng và phòng hiện lại cho người khác tìm.
+
+**Mức thanh toán:** MVP mô phỏng kết quả thanh toán, không tích hợp cổng thanh toán thật. Không notification, không idempotency-key, không PKCE public-client riêng ở frontend, không xây website hoàn chỉnh.
 
 > **Phạm vi số liệu 8/9:** tính theo **9 chủ đề trong `team-plan.md`**, không phải 9 thư viện độc lập. **Chủ đề Mobile Push Notification bị bỏ**. IAM/SSO/PKCE chỉ tính đạt khi chứng minh được **cả ba nội dung** phù hợp với cách triển khai Google ở plan này. Nếu mentor bắt buộc phải thấy push thì phải xin xác nhận điều chỉnh phạm vi, không tuyên bố đã đạt đủ 9/9.
 
@@ -30,12 +32,13 @@
 ### 1.1 Phải làm (MVP)
 
 - **2 tenant** cùng dùng 1 hệ thống: dữ liệu phòng/booking của tenant này không bị tenant khác đọc hoặc sửa.
-- Role `USER` (xem và đặt phòng tenant mình) và `ADMIN` (xem, thêm phòng, sửa giá, xem toàn bộ booking tenant mình).
-- Google login qua `iam-service`; tài khoản phải được **provision trước** trong bảng `app_user`, không có tự đăng ký/gán tenant mặc định.
+- Role `USER` (tìm phòng theo tiêu chí/thời gian, đặt và huỷ booking của mình) và `ADMIN` (quản lý phòng, xem số lượng phòng, booking trong tenant và điều phối/gán phòng cho booking).
+- Google login qua `iam-service`; tài khoản phải được **provision trước** trong bảng `users`, không có tự đăng ký/gán tenant mặc định.
 - IAM ký JWT nội bộ RS256 có `sub`, `email`, `tenant_id`, `role` (kèm `iss`, `iat`, `exp` và thông tin kiểm tra chữ ký); services verify bằng JWKS.
-- Danh sách phòng, thêm phòng và sửa giá theo tenant; giá là số dương.
-- `USER` đặt 1 phòng còn trống, Catalog đánh dấu hết chỗ **nguyên tử**; 2 request cạnh tranh một phòng chỉ 1 request thành công.
-- Booking `CONFIRMED` ngay nếu hold thành công; xem booking có kiểm tra tenant và quyền sở hữu.
+- `room.operational_status` là tình trạng vận hành `ACTIVE`/`MAINTENANCE`; kết quả tìm kiếm trả `status` `AVAILABLE`/`BOOKED` theo `checkIn`/`checkOut`.
+- `USER` chỉ được đặt phòng khả dụng trong đúng khoảng giờ; booking `PENDING_PAYMENT` giữ phòng để người khác không thấy/đặt trùng. Hai request cùng phòng và thời gian chỉ một request thành công.
+- Thanh toán mô phỏng chuyển `PENDING_PAYMENT → CONFIRMED`. Huỷ chuyển sang `CANCELLED`, giải phóng khoảng giờ; hết hạn thanh toán chuyển `EXPIRED` và cũng giải phóng.
+- `USER` chỉ xem/huỷ booking của mình. Chỉ `ADMIN` xem thống kê tổng phòng, danh sách điều phối và gán/đổi phòng cho booking trong tenant.
 - Flyway cho các DB nghiệp vụ, REST API, chuẩn lỗi, unit tests, sequence diagrams và demo E2E.
 - 2 HTML demo rất nhỏ (2 origin) để chứng minh Google SSO/PKCE và các thao tác chính.
 
@@ -43,8 +46,8 @@
 
 - `notification-service`, FCM/APNs, push token/inbox.
 - Keycloak/V-ID thực, phát triển OAuth2 Authorization Server riêng, tích hợp hệ thống tài khoản production.
-- Payment, `PENDING`, refund, hủy booking, auto-expire hold, idempotency-key.
-- Check-in/check-out, `room_inventory` theo ngày, số đêm, loại phòng, giá theo ngày.
+- Cổng thanh toán thật, xử lý refund tự động, notification, idempotency-key.
+- `room_inventory` theo ngày và định giá theo ngày; tuy vậy booking vẫn có `check_in`/`check_out` timestamp để kiểm tra phòng trống theo thời gian.
 - Kubernetes, Kafka/RabbitMQ, service discovery, distributed transaction, hệ thống UI hoàn chỉnh, mua vé.
 - Refresh token nội bộ, token revocation, JWT key rotation tự động; không tuyên bố phù hợp production.
 
@@ -60,13 +63,13 @@ HTML App 1 :3000 ─┐
 HTML App 2 :3001 ─┘                    │
           │                            └─ JWT RS256 / JWKS
           └── Bearer JWT ──> api-gateway :8080
-                                 ├── /api/rooms/** ──> catalog-service :8081 ──┐
-                                 └── /api/bookings/** ──> booking-service :8082 ─┤── 1 database Postgres chung "hotelbooking"
-                                       └─ /internal/rooms/{id}/hold ──> catalog-service
+                                 ├── /api/rooms/search/** ──> catalog-service :8081 ─┐
+                                 ├── /api/admin/rooms/** ──> catalog-service :8081 ──┤── 1 database Postgres chung "hotelbooking"
+                                 └── /api/bookings/** ──> booking-service :8082 ─────┘
 
 api-gateway, catalog-service, booking-service xác minh JWT từ JWKS của iam-service.
 iam-service, catalog-service, booking-service dùng CHUNG 1 database "hotelbooking" (1 schema `public`),
-có FK thật giữa bảng tenant/app_user (iam) ↔ room (catalog) ↔ booking (booking). Mỗi service vẫn chỉ tự
+có FK thật giữa bảng `tenant`/`users` (IAM) ↔ `room` (Catalog) ↔ `booking` (Booking). Mỗi service vẫn chỉ tự
 quản lý migration cho bảng của mình (ranh giới ownership giữ nguyên), chỉ khác là không tách DB vật lý.
 ```
 
@@ -76,8 +79,8 @@ quản lý migration cho bảng của mình (ranh giới ownership giữ nguyên
 | `iam-service` | A | Google login, PKCE, allowlist user, JWT, JWKS | Không dùng Keycloak |
 | `common-security` | A | Verify JWT, role, `TenantContext` | Module thư viện, không chạy như service |
 | `api-gateway` :8080 | A | Forward API có Bearer token | Không route `/internal/**` |
-| `catalog-service` :8081 | B | CRUD phòng và hold nguyên tử | DB riêng, dữ liệu theo tenant |
-| `booking-service` :8082 | C | Tạo/xem booking | DB riêng, gọi Catalog bằng REST |
+| `catalog-service` :8081 | B | Tìm phòng theo lựa chọn/thời gian, quản lý phòng và inventory Admin | DB chung, dữ liệu theo tenant |
+| `booking-service` :8082 | C | Tạo booking giữ giờ, thanh toán mô phỏng, xem/huỷ booking | DB chung, sở hữu booking và chống overlap |
 | HTML App 1 :3000 và App 2 :3001 | D | Chứng minh SSO, gọi API/role | HTML/JS tối giản, không framework UI mới |
 | `docs/demo.http`, test manual, diagrams và README demo | D chủ trì | Bằng chứng trình diễn, tích hợp | A/B/C cung cấp response, test report và sơ đồ của mình |
 
@@ -85,11 +88,11 @@ quản lý migration cho bảng của mình (ranh giới ownership giữ nguyên
 
 **Version gate trước khi code:** A xác minh phiên bản Spring Boot / Spring Security / Spring Cloud (nếu có dùng) / Gradle wrapper tương thích. **Không tự nâng cấp toàn repo chỉ vì thấy có phiên bản mới hơn**; ghi phiên bản khóa trong `docs/decisions.md`, chạy `./gradlew build` được rồi mới yêu cầu các service cùng tuân thủ.
 
-**Cơ sở dữ liệu (đã đổi so với bản đầu v2):** một PostgreSQL server local, **1 database chung** `hotelbooking`, 1 schema `public`. Không tách `iam_db`/`catalog_db`/`booking_db`/`notification_db` riêng — lý do: hệ thống nhỏ, 1 nhóm, không cần scale/deploy schema độc lập giữa service, và "database-per-service" không phải chủ đề mentor chấm (xem §10) nên không cần trả giá độ phức tạp đó. Đổi lại, có **FK thật** giữa các bảng — `room.tenant_id → tenant.id`, `booking.tenant_id → tenant.id`, và 2 FK **ghép (composite)** `booking.(tenant_id, room_id) → room.(tenant_id, id)` + `booking.(tenant_id, user_email) → app_user.(tenant_id, email)` để chặn luôn trường hợp room/user tồn tại nhưng **sai tenant** (FK đơn cột không chặn được điều này — xem `docs/erd-v2.md` mục 2). DB tự chặn dữ liệu rác thay vì phải tự verify bằng code như bản tách DB.
+**Cơ sở dữ liệu:** một PostgreSQL server local, **1 database chung** `hotelbooking`, 1 schema `public`. Có FK thật giữa tenant/users/room/booking và FK ghép để chặn room/user sai tenant. Booking giữ `check_in`/`check_out`; constraint DB chặn hai booking active cùng phòng bị overlap (xem `docs/erd-v2.md`).
 
-Mỗi service **vẫn chỉ sở hữu và chạy migration cho bảng của mình** (A: `tenant`, `app_user`; B: `room`; C: `booking`) — ranh giới ownership giữa A/B/C/D giữ nguyên như §6, chỉ khác là 3 bộ migration cùng ghi vào 1 database. Để 3 bộ Flyway độc lập không đụng version với nhau, mỗi service dùng riêng `spring.flyway.table` (`flyway_schema_history_iam`, `flyway_schema_history_catalog`, `flyway_schema_history_booking`) — nếu không, Flyway sẽ coi version `1`/`2` của service này đã "chạy" khi thấy version đó trong lịch sử của service khác.
+Mỗi service **vẫn chỉ sở hữu và chạy migration cho bảng của mình** (A: `tenant`, `users`; B: `room`; C: `booking`). Để 3 bộ Flyway độc lập không đụng version, mỗi service dùng riêng `spring.flyway.table` (`flyway_schema_history_iam`, `flyway_schema_history_catalog`, `flyway_schema_history_booking`). Tên bảng vật lý `users` đại diện cho user; tránh dùng tên `user` vì đó là từ khóa SQL.
 
-**Phụ thuộc thứ tự migration (do có FK thật):** `iam-service` phải migrate trước (tạo `tenant`, `app_user`) rồi mới tới `catalog-service` (FK `room.tenant_id → tenant.id`), rồi `booking-service` (FK tới cả `tenant`, `room`, `app_user`). Nếu chạy `catalog-service`/`booking-service` trước khi `iam-service` từng chạy ít nhất 1 lần trên DB sạch, migration sẽ **fail rõ ràng** vì thiếu bảng tham chiếu (lỗi tốt hơn — báo ngay lúc migrate, không phải để sai âm thầm như bản tách DB).
+**Phụ thuộc thứ tự migration:** `iam-service` tạo `tenant`/`users` trước, `catalog-service` tạo `room` tiếp theo, rồi `booking-service` tạo `booking` vì có FK tới các bảng trên.
 
 ---
 
@@ -100,7 +103,7 @@ Mỗi service **vẫn chỉ sở hữu và chạy migration cho bảng của mì
 1. Người dùng mở HTML App 1/2 và chọn **Login with Google**.
 2. Browser chuyển đến `iam-service` ở `/auth/start?app=app1` hoặc `app2` (mã app phải nằm trong allowlist). IAM có thể dùng phiên đăng nhập hiện có hoặc bắt đầu OAuth2 login Google.
 3. Nếu cần OAuth2, Spring Security chuyển tới Google theo **Authorization Code Flow + PKCE S256**. Google gọi callback **về IAM**, ví dụ `http://localhost:8084/login/oauth2/code/google` (đăng ký chính xác URI này trong Google Cloud).
-4. IAM kiểm tra danh tính Google đã xác thực, `email_verified` và tra `app_user` **theo email đã chuẩn hóa**. Email không được provision => **403**; tuyệt đối không tự gán tenant.
+4. IAM kiểm tra danh tính Google đã xác thực, `email_verified` và tra `users` **theo email đã chuẩn hóa**. Email không được provision => **403**; tuyệt đối không tự gán tenant.
 5. Có user hợp lệ => IAM tạo JWT nội bộ RS256: `sub` ổn định cho user nội bộ, `email`, `tenant_id`, `role`, `iss`, `iat`, `exp`. `google_sub` có thể lưu/đối chiếu với user được provision theo chính sách nhóm đã chốt; không cho Google account khác chiếm mapping đã liên kết.
 6. IAM chỉ redirect về **địa chỉ callback trong allowlist** (`http://localhost:3000/callback` hoặc `http://localhost:3001/callback`) kèm `#token=...`. Frontend đọc rồi **xóa fragment khỏi URL ngay**, giữ token **trong memory**; không ghi log, localStorage, query string hoặc Git.
 7. App 1/2 dùng Bearer JWT nội bộ gọi Gateway. Gateway và service verify chữ ký, issuer/expiry, role, tenant.
@@ -125,8 +128,8 @@ Mỗi service **vẫn chỉ sở hữu và chạy migration cho bảng của mì
 
 - Tối thiểu **2 tenant**; mỗi tenant có 1 `ADMIN` và 1 `USER` dùng tài khoản Google thử nghiệm thật.
 - Để chứng minh **hai người khác nhau** cùng tenant tranh một phòng, ưu tiên chuẩn bị thêm **USER thứ hai của tenant 1** (tổng tối thiểu 5 Google accounts). Nếu không chuẩn bị được tài khoản thứ 5, có thể chạy **2 request đồng thời bằng cùng một JWT** để chứng minh atomic update, nhưng phải nói rõ đó là hai request, **không được gọi là hai người dùng độc lập**.
-- Khai báo seed `tenant` qua migration. Dữ liệu `app_user` demo có thể seed bằng script/SQL local ngoài Git với email thật (hoặc qua biến môi trường được quản lý đúng); **không commit email cá nhân, access token, client secret hoặc private key**. `docs/demo-data.md` chỉ lưu alias và ID test không nhạy cảm.
-- Tài khoản Google chưa provision => 403; tenant/role lấy từ `app_user`, không lấy từ tham số trình duyệt.
+- Khai báo seed `tenant` qua migration. Dữ liệu `users` demo có thể seed bằng script/SQL local ngoài Git với email thật (hoặc qua biến môi trường được quản lý đúng); **không commit email cá nhân, access token, client secret hoặc private key**. `docs/demo-data.md` chỉ lưu alias và ID test không nhạy cảm.
+- Tài khoản Google chưa provision => 403; tenant/role lấy từ `users`, không lấy từ tham số trình duyệt.
 
 ---
 
@@ -139,13 +142,13 @@ Mỗi service **vẫn chỉ sở hữu và chạy migration cho bảng của mì
 | Bảng | Owner | Các trường bắt buộc | FK thật |
 |---|---|---|---|
 | `tenant` | A | `id`, `name` | — |
-| `app_user` | A | `id`, `email` unique, `tenant_id`, `role (USER/ADMIN)`, `google_sub` (nếu gắn danh tính) | `tenant_id → tenant.id` |
-| `room` | B | `id`, `tenant_id`, `name`, `price`, `available BOOLEAN DEFAULT true` | `tenant_id → tenant.id` |
-| `booking` | C | `id`, `tenant_id`, `room_id`, `user_email`, `status=CONFIRMED`, `created_at` | `tenant_id → tenant.id`; FK ghép `(tenant_id, room_id) → room(tenant_id, id)`; FK ghép `(tenant_id, user_email) → app_user(tenant_id, email)` |
+| `users` | A | `id`, `email` unique/lowercase, `tenant_id`, `role (USER/ADMIN)`, `google_sub`; unique `(tenant_id, email)` | `tenant_id → tenant.id` |
+| `room` | B | `id`, `tenant_id`, `name`, `room_type`, `capacity`, `price`, `operational_status VARCHAR(20) CHECK IN ('ACTIVE','MAINTENANCE')` | `tenant_id → tenant.id`; unique `(tenant_id, id)` |
+| `booking` | C | `id`, `tenant_id`, `room_id`, `email`, `check_in`, `check_out`, `status (PENDING_PAYMENT/CONFIRMED/CANCELLED/EXPIRED)`, `assigned_by`, `created_at` | `tenant_id → tenant.id`; FK ghép `(tenant_id, room_id) → room(tenant_id, id)`; FK ghép `(tenant_id, email) → users(tenant_id, email)`; thời gian hợp lệ và không overlap khi active |
 
 - Flyway tạo schema, constraints/index, FK thật như trên; có seed data có thể tái hiện.
 - Mỗi service dùng riêng `spring.flyway.table` (`flyway_schema_history_iam`/`_catalog`/`_booking`) vì 3 bộ migration độc lập cùng ghi vào 1 database — tránh đụng số version giữa các service.
-- **Thứ tự migrate bắt buộc vì có FK thật:** A (`tenant`, `app_user`) → B (`room`) → C (`booking`). Chạy B/C trước A trên DB sạch sẽ fail ngay do thiếu bảng tham chiếu — đây là hành vi đúng, không phải bug.
+- **Thứ tự migrate bắt buộc vì có FK thật:** A (`tenant`, `users`) → B (`room`) → C (`booking`). Chạy B/C trước A trên DB sạch sẽ fail ngay do thiếu bảng tham chiếu — đây là hành vi đúng, không phải bug.
 - Giá phải lớn hơn 0, `room_id`/`tenant_id` không null. Nên dùng giá dạng decimal thay cho float.
 - Không sửa migration đã chạy/merge; thay đổi thêm migration version mới.
 
@@ -153,31 +156,44 @@ Mỗi service **vẫn chỉ sở hữu và chạy migration cho bảng của mì
 
 | Endpoint demo (qua Gateway) | Service thật | Quyền | Kết quả chính |
 |---|---|---|---|
-| `GET /api/rooms` | `GET /rooms` — B | `USER`, `ADMIN` | 200, chỉ phòng tenant trong JWT |
+| `GET /api/rooms/search?checkIn=...&checkOut=...&guestCount=...&roomType=...` | B | `USER`, `ADMIN` | 200, chỉ phòng trống đúng tiêu chí/khung giờ; chỉ gọi sau khi bấm Tìm kiếm |
 | `POST /api/rooms` | `POST /rooms` — B | `ADMIN` | 201; tenant được gán từ JWT, không nhận từ body |
 | `PUT /api/rooms/{id}/price` | `PUT /rooms/{id}/price` — B | `ADMIN` | 200; tenant khác => 404; role sai => 403 |
-| `POST /api/bookings` `{ "roomId": ... }` | `POST /bookings` — C | `USER` | 201 `CONFIRMED`; hết phòng => 409; khác tenant/không có => 404 |
+| `POST /api/bookings` `{ "roomId", "checkIn", "checkOut" }` | `POST /bookings` — C | `USER` | 201 `PENDING_PAYMENT`; trùng giờ => 409; khác tenant/không có => 404 |
+| `POST /api/bookings/{id}/payment` | C | `USER` là chủ booking | 200; mô phỏng thanh toán thành công, `PENDING_PAYMENT→CONFIRMED` |
+| `POST /api/bookings/{id}/cancel` | C | `USER` là chủ booking hoặc `ADMIN` cùng tenant | 200 `CANCELLED`; giải phóng khoảng giờ |
 | `GET /api/bookings` | `GET /bookings` — C | `USER`, `ADMIN` | USER chỉ xem của mình, ADMIN xem trong tenant |
 | `GET /api/bookings/{id}` | `GET /bookings/{id}` — C | `USER`, `ADMIN` | 200 đúng quyền; khác tenant/owner => 404 |
-| `POST /internal/rooms/{id}/hold` | B — C gọi trực tiếp | **Internal** | 200 nếu chuyển available true→false; hết phòng 409; sai tenant/ID 404 |
+| `GET /api/admin/rooms/summary?checkIn=...&checkOut=...` | B | **ADMIN** | Tổng phòng và số AVAILABLE/BOOKED trong khoảng giờ; USER => 403 |
+| `GET /api/admin/rooms?checkIn=...&checkOut=...` | B | **ADMIN** | Danh sách quản trị gồm cả phòng bận/trống và tình trạng vận hành; USER => 403 |
+| `PUT /api/admin/bookings/{id}/room` | C → B | **ADMIN** | Gán/đổi phòng khi tenant/capacity/time còn hợp lệ; overlap => 409; USER => 403 |
 | `GET /.well-known/jwks.json` | A/IAM | Public | Public RSA JWK, không chứa private key |
 | `GET /auth/start?app=app1\|app2` | A/IAM | Public | Bắt đầu/tiếp tục login Google; app trong allowlist |
 
+Form tìm phòng yêu cầu `checkIn`, `checkOut`, `guestCount` và các lựa chọn đang hiển thị (ví dụ `roomType`); danh sách không tải trước. Chỉ sau khi người dùng chọn đủ trường bắt buộc và bấm **Tìm kiếm**, UI gọi `/api/rooms/search`. Response trả trường `status=AVAILABLE` theo khoảng thời gian đó. Phòng có booking `PENDING_PAYMENT` hoặc `CONFIRMED` overlap bị loại khỏi kết quả. Backend vẫn phải áp dụng constraint lúc tạo booking vì kết quả tìm kiếm có thể cũ.
+
+Chỉ Admin được gọi summary để xem số lượng phòng (tổng, bảo trì, khả dụng/đã giữ theo khoảng giờ) và các API điều phối/gán phòng. User thường chỉ nhận danh sách phòng phù hợp `AVAILABLE`; Admin view có thể thấy cả phòng `BOOKED` trong cùng khung giờ. Việc gán lại phải kiểm tra cùng tenant, tình trạng vận hành, sức chứa và khoảng thời gian; không cho hai booking active dùng cùng phòng trong thời gian overlap.
+
 **Gateway rewrite:** `/api/rooms/**` chuyển thành `/rooms/**`; `/api/bookings/**` thành `/bookings/**`. Chốt chính xác cách rewrite trước G2. Login/callback/JWKS có thể gọi **trực tiếp IAM :8084** để tránh thêm rủi ro route OAuth state/cookie; **không bắt buộc** đưa OAuth callback qua gateway.
 
-**Mã lỗi thống nhất:** `400` request sai, `401` thiếu/hỏng/hết hạn JWT, `403` sai role hoặc Google email không được provision, `404` không tồn tại hoặc thuộc tenant/owner khác, `409` phòng đã có người giữ. Mỗi endpoint phải có request/response/error mẫu trong `docs/api-contract.md`.
+**Mã lỗi thống nhất:** `400` request sai (bao gồm `checkOut <= checkIn`), `401` thiếu/hỏng/hết hạn JWT, `403` sai role hoặc Google email không được provision, `404` không tồn tại hoặc thuộc tenant/owner khác, `409` booking overlap/phòng đã được giữ hoặc trạng thái không cho phép chuyển.
 
-**Điểm phải code đúng ở hold:**
+**Điểm phải code đúng khi tạo booking/giữ khoảng giờ:**
 
 ```sql
-UPDATE room SET available = false
-WHERE id = :roomId AND tenant_id = :tenantId AND available = true;
+-- Booking PENDING_PAYMENT hoặc CONFIRMED giữ khoảng thời gian.
+-- PostgreSQL EXCLUDE constraint kiểm tra overlap một cách nguyên tử.
+INSERT INTO booking (tenant_id, room_id, email, check_in, check_out, status)
+VALUES (:tenantId, :roomId, :email, :checkIn, :checkOut, 'PENDING_PAYMENT');
 ```
 
-- Chỉ thành công khi số row cập nhật **= 1**; chạy với transaction DB phù hợp. Nếu số row = 0, kiểm tra xem room có thuộc tenant hiện tại hay không để trả **404 nếu không thấy**, **409 nếu đúng phòng nhưng đã unavailable**; không bao giờ trả dữ liệu tenant khác.
-- Booking forward JWT của người gọi, Catalog tự verify lại JWT và lấy tenant từ JWT.
-- Endpoint `/internal/**` **không expose qua gateway**; ưu tiên chỉ mở giữa services trong mạng local/Compose. Việc chặn Gateway **chưa đủ bảo mật** nếu cổng service vẫn được truy cập trực tiếp. Ghi rõ giới hạn demo-local.
-- **Giới hạn biết trước:** dù giờ `room` và `booking` nằm trong 1 database, `catalog-service` và `booking-service` vẫn là 2 process riêng gọi nhau qua HTTP — hold (ở Catalog) và insert booking (ở Booking) **vẫn là 2 transaction riêng biệt**, không gộp thành 1 transaction ACID được (muốn vậy phải gọi trực tiếp trong cùng JVM, bỏ kiến trúc nhiều service). Vì đã bỏ `release`/compensation, nếu hold thành công nhưng insert `booking` thất bại, phòng có thể bị kẹt `unavailable`. **Không được tuyên bố xử lý distributed transaction an toàn**. Có quy trình reset seed/DB test để demo ổn định; chỉ cân nhắc bổ sung compensation sau khi luồng MVP PASS và cả nhóm duyệt phạm vi.
+- Nếu constraint báo overlap, trả `409`; không tạo booking trùng giờ. Catalog search loại room không `ACTIVE`; Booking kiểm tra room, tenant và capacity rồi insert booking active.
+- Booking/Catalog lấy `tenant_id` và email từ JWT đã verify, không tin body.
+- Exclusion constraint kiểm tra overlap đồng thời; không dựa vào search vừa trả phòng trống vì kết quả có thể cũ.
+- Chỉ Admin xem room summary và gán/đổi phòng. Endpoint phải kiểm tra role và tenant trong JWT.
+- Catalog search đọc read-only các khoảng booking active từ cùng database; Booking là service duy nhất được ghi bảng booking.
+- Trạng thái `PENDING_PAYMENT` phải có thời hạn cấu hình; job đổi booking quá hạn thành `EXPIRED` để giải phóng thời gian. Cancel chuyển `PENDING_PAYMENT`/`CONFIRMED` sang `CANCELLED`; không xoá lịch sử booking.
+- **Giới hạn biết trước:** nếu thanh toán thành công bên ngoài nhưng cập nhật booking thất bại, trạng thái cần reconciliation; demo chỉ mô phỏng thanh toán, không tuyên bố xử lý giao dịch tiền thật.
 
 ---
 
@@ -186,8 +202,8 @@ WHERE id = :roomId AND tenant_id = :tenantId AND available = true;
 | Owner | Unit tests tối thiểu có ý nghĩa | Bằng chứng PASS |
 |---|---|---|
 | **A — IAM/security** | User chưa provision bị 403; token thiếu `tenant_id` bị reject; map role đúng; token hợp lệ/hết hạn | Test chạy local **không cần login Google thật**; verify JWT/security bằng fixture/mocks |
-| **B — Catalog** | `USER` thêm/sửa phòng => 403; `ADMIN` sửa room khác tenant => 404; GET filter tenant; hold trả 409 khi hết phòng | Assertions đối chiếu DB/mock repository đúng từng nhánh |
-| **C — Booking** | Hold thành công => tạo `CONFIRMED`; hold 409/404 => không tạo booking; USER chỉ đọc booking của mình; ADMIN đọc trong tenant | Mock REST client Catalog trong unit test; assert status và side-effect |
+| **B — Catalog** | Search chỉ sau nút Tìm kiếm; lọc check-in/out, guestCount, roomType, tenant; loại phòng bảo trì; chỉ Admin xem tổng và điều phối | USER không xem inventory tổng/không gọi Admin API; status theo khung giờ đúng |
+| **C — Booking** | Overlap trả 409; tạo `PENDING_PAYMENT` giữ giờ; payment mô phỏng thành công → `CONFIRMED`; cancel/expiry giải phóng giờ; USER chỉ xem/huỷ booking mình | Test cùng giờ/khác giờ, thanh toán, huỷ, expiry và quyền; booking huỷ không chặn search |
 | **D — Demo/QA** | D **không thay A/B/C viết test cho service của họ**; D viết bộ kiểm thử HTTP/integration xuyên service và hướng dẫn chạy test | `docs/demo.http`, `docs/test-evidence.md`, script và response PASS/FAIL tái hiện |
 
 **Phân biệt:** Unit Test chạy với JUnit/Mockito và không phụ thuộc Google/DB thật; test **concurrency** và **cross-tenant** trong luồng demo nên dùng integration/manual check với PostgreSQL thật. Không chỉ gọi `curl` rồi ghi là Unit Test.
@@ -200,7 +216,7 @@ Lệnh bằng chứng tối thiểu: `./gradlew clean build` (Windows `gradlew.b
 
 ### A — IAM / Platform / Security (phần chủ trì kỹ thuật)
 
-- Sở hữu `iam-service` (bảng `tenant`, `app_user`), `common-security`, `api-gateway`, cấu hình root Gradle và Compose (bao gồm database chung `hotelbooking`).
+- Sở hữu `iam-service` (bảng `tenant`, `users`), `common-security`, `api-gateway`, cấu hình root Gradle và Compose (bao gồm database chung `hotelbooking`).
 - Cấu hình Google Cloud OAuth Client, redirect URI IAM, PKCE S256, Google account allowlist, JWT RS256 và JWKS.
 - Cung cấp cho B/C/D: issuer/JWKS, JWT claims/roles/tenant IDs, API login/callback, các port và ví dụ lỗi auth.
 - Test IAM/JWT/401/403, diagram IAM login + PKCE + SSO.
@@ -208,22 +224,23 @@ Lệnh bằng chứng tối thiểu: `./gradlew clean build` (Windows `gradlew.b
 
 ### B — Catalog / Flyway / Multi-tenancy
 
-- Sở hữu `catalog-service`, migration/seed bảng `room` (trong database chung), API rooms, atomic `hold`.
-- Đảm bảo mọi query và update giới hạn tenant; trả 403/404/409 đúng contract.
-- Cung cấp cho C API `/internal/rooms/{id}/hold`, cho D room ID và seed/reset demo.
-- Unit tests, test tranh phòng thực với C, diagram tenant + hold.
+- Sở hữu `catalog-service`, migration/seed bảng `room`, tìm kiếm theo tiêu chí/thời gian, quản lý phòng và Admin inventory summary.
+- Trả trường `status` khả dụng theo khung giờ; filter tenant, tình trạng vận hành, sức chứa và loại phòng.
+- Chỉ Admin xem số lượng tổng và điều phối/gán phòng; mọi lần gán phải kiểm tra overlap.
+- Unit/integration checks cho search, tenant filter, Admin permission và điều phối phòng.
 
 ### C — Booking / REST / Unit Test
 
-- Sở hữu `booking-service`, migration bảng `booking` (trong database chung), POST/GET booking, gọi B bằng JWT.
-- Booking lập tức `CONFIRMED`; không viết payment/cancel/idempotency.
+- Sở hữu `booking-service`, migration bảng `booking`, POST/GET/cancel booking, thanh toán mô phỏng và expiry.
+- Tạo `PENDING_PAYMENT` để giữ khoảng giờ; payment thành công thành `CONFIRMED`; cancel/expiry giải phóng giờ. Không tích hợp cổng thanh toán thật.
+- Gán/đổi room theo thao tác Admin, ghi `assigned_by` và kiểm tra exclusion constraint.
 - Cung cấp cho D request/response/error booking, quyền USER/ADMIN, script test cạnh tranh.
 - Unit tests/validation và diagram booking với nhánh 404/409.
 
 ### D — Frontend demo / Integration QA / Documentation (phân công MỚI)
 
 - Sở hữu **2 trang HTML/JS tối giản** (khác port) để gọi login Google qua IAM, nhận JWT nội bộ vào memory và demo SSO.
-- App 1 có thể hiển thị rooms, đặt phòng (`USER`); App 2 dùng cùng code thành phần đơn giản và có thể hiển thị rooms; với `ADMIN`, hiện form thêm phòng và sửa giá. **Chỉ làm UI đủ để trình diễn endpoint, không làm website đẹp/full-feature.**
+- App 1 hiển thị form tìm phòng; chỉ hiện kết quả sau khi chọn đủ tiêu chí và bấm Tìm kiếm. USER đặt/huỷ booking của mình. Với `ADMIN`, hiện số lượng phòng, danh sách booking và công cụ gán/đổi phòng. **Chỉ làm UI đủ để trình diễn endpoint, không làm website đẹp/full-feature.**
 - Sở hữu `docs/demo.http`, `docs/demo-data.md` phần alias (A/B/C xác nhận), `docs/demo-script.md`, `docs/test-evidence.md`, phần README chạy demo, tổng hợp sequence diagrams do A/B/C gửi.
 - Test thực tế: SSO giữa App 1–2; role USER/ADMIN; cross-tenant; tranh phòng; API lỗi; JWT thiếu/invalid; kiểm tra Flyway và kết quả test của từng service.
 - **Không chỉnh** service IAM/Catalog/Booking, migration, root Gradle hoặc gateway bằng Codex trên branch D nếu chưa được owner đồng ý. Bug thuộc owner nào thì tạo issue kèm HTTP request/log đã lược bí mật.
@@ -243,19 +260,19 @@ Lệnh bằng chứng tối thiểu: `./gradlew clean build` (Windows `gradlew.b
 
 | Giờ (tương đối) | A | B | C | D | Điều kiện chốt |
 |---|---|---|---|---|---|
-| **09:00–10:00 — G0** | Kiểm tra repo/versions/Google OAuth | Chốt room/tenant schema | Chốt create booking/hold contract | Ghi decisions, kịch bản demo và ports App 1/2 | Mọi người chấp thuận scope + 8/9, owner, seed, tài khoản Google test và Git rule |
-| **10:00–12:00 — G1/G2** | Gradle skeleton, Compose, IAM claim/API auth | API rooms/hold JSON | API booking JSON | Soạn `docs/demo-script.md`, `docs/demo.http` placeholder, HTML skeleton | `./gradlew build` trên skeleton; **contract đã chốt** và mỗi bên nhận API ký nhận |
-| **13:00–15:00** | Migrate database chung (bảng `tenant`/`app_user`), Google client, provision, JWT/JWKS | Migrate bảng `room` (sau khi A đã chạy), seed rooms | Migrate bảng `booking` (sau khi A/B đã chạy), stub Catalog | HTML callback nhận token memory, giao diện rooms tối giản | 3 bộ migration (1 database) chạy đúng thứ tự A→B→C; IAM có test/mocks; HTML không hard-code token |
-| **15:00–17:00** | Google login thật, PKCE config, common-security | GET/POST/PUT rooms, tenant filter | POST booking với mock hold | Kết nối UI vào sample/mock contract, xây checklist test | Dùng được từng phần độc lập, chưa lấy stub làm bằng chứng security |
+| **09:00–10:00 — G0** | Kiểm tra repo/versions/Google OAuth | Chốt room/search/admin schema | Chốt booking/payment/cancel/time contract | Ghi decisions, kịch bản demo và ports App 1/2 | Mọi người chấp thuận scope + 8/9, owner, seed, tài khoản Google test và Git rule |
+| **10:00–12:00 — G1/G2** | Gradle skeleton, Compose, IAM claim/API auth | API search/room/admin JSON | API booking/payment/cancel JSON | Soạn `docs/demo-script.md`, `docs/demo.http` placeholder, HTML skeleton | `./gradlew build` trên skeleton; **contract đã chốt** và mỗi bên nhận API ký nhận |
+| **13:00–15:00** | Migrate database chung (bảng `tenant`/`users`), Google client, provision, JWT/JWKS | Migrate bảng `room`, search API và seed rooms | Migrate bảng `booking` có check-in/out và exclusion constraint | HTML callback nhận token memory, form tìm kiếm tối giản | 3 bộ migration chạy đúng thứ tự A→B→C; search lọc được phòng theo khoảng giờ |
+| **15:00–17:00** | Google login thật, PKCE config, common-security | Search/CRUD rooms, tenant filter, Admin summary | POST booking `PENDING_PAYMENT`, mock payment/cancel | Kết nối form tìm kiếm và kết quả vào API | Dùng được từng phần độc lập, chưa lấy stub làm bằng chứng security |
 | **17:00–18:00 — G3** | JWT hợp lệ và auth tests | API B + ID seed cho C/D | POST booking mock, unit tests đầu tiên | Script login/rooms demo bản nháp, tổng hợp issues | Build xanh; **có đường lấy JWT Google** hoặc báo rõ Google Cloud blocker; từng service khởi động được |
 
 ### Ngày 2 — Tích hợp và chứng minh stack
 
 | Giờ | A | B | C | D | Điều kiện chốt |
 |---|---|---|---|---|---|
-| **09:00–11:00** | JWKS/JWT ở gateway và service; PKCE S256 | Hold nguyên tử thật | Thay mock Catalog bằng REST thật, forward JWT | 2 HTML ở 2 origin, login Google; gọi GET rooms | JWT thật đi được các service, 2 app không lộ secret |
-| **11:00–12:00 — G4** | Hỗ trợ issuer/CORS/redirect | Cung cấp response hold 200/404/409 | Tạo booking 201 hoặc lỗi 409/404 theo B | HTTP script test Booking–Catalog | Gateway → Booking → Catalog thành công; tenant đúng, no oversell |
-| **13:00–15:00** | Minh chứng SSO + PKCE, JWT negative | POST/PUT rooms auth, cross-tenant | GET bookings role/owner | Hoàn thiện App 1/2, role USER/ADMIN và demo.http | Có bằng chứng Google SSO, PKCE S256, isolation |
+| **09:00–11:00** | JWKS/JWT ở gateway và service; PKCE S256 | Search theo thời gian + Admin inventory | Booking insert với exclusion constraint, forward JWT | 2 HTML ở 2 origin, login Google; search theo form | JWT thật đi được các service, 2 app không lộ secret |
+| **11:00–12:00 — G4** | Hỗ trợ issuer/CORS/redirect | Search availability + Admin room summary/assign | Tạo booking pending, chống overlap | HTTP script test search/booking | Search → booking → pending-payment hoạt động; tenant đúng, no double-booking |
+| **13:00–15:00** | Minh chứng SSO + PKCE, JWT negative | Search filters, Admin summary/assignment, cross-tenant | Payment mock, cancel, expiry; GET bookings role/owner | Hoàn thiện App 1/2, role USER/ADMIN và demo.http | Có bằng chứng SSO/PKCE/isolation và room release đúng time window |
 | **15:00–17:00** | Unit tests IAM | Unit tests + race test với C | Unit tests + race test với B | Test hai requests, cross-tenant, 401/403/404/409; ghi evidence | Test chạy không phụ thuộc thao tác mơ hồ; lỗi cross-service có issue/owner |
 | **17:00–18:00 — G5** | Build/security evidence | Seed/reset + test evidence | Booking evidence | Run toàn bộ luồng, nháp diagrams & README | Happy path/negative path qua gateway PASS; `./gradlew build` xanh |
 
@@ -263,9 +280,9 @@ Lệnh bằng chứng tối thiểu: `./gradlew clean build` (Windows `gradlew.b
 
 | Giờ | A | B | C | D | Điều kiện chốt |
 |---|---|---|---|---|---|
-| **09:00–11:00** | Test login/PKCE/SSO, token lỗi | Test tenant + race, reset DB | Test booking owner và trạng thái | Chạy `docs/demo.http` trên state sạch; ghi PASS/FAIL | Không có lỗi P0 chưa phân owner |
-| **11:00–12:00** | Gửi IAM sequence & test log | Gửi tenant/hold sequence & DB history | Gửi booking sequence & test log | Gom 3 diagrams + 1 sơ đồ demo tổng hợp nếu cần; hoàn thiện docs | Diagrams, endpoint, roles, JSON thực khớp code |
-| **13:00–15:00 — G6** | Dẫn Google IAM/PKCE/SSO | Dẫn tenant/CRUD/hold | Dẫn booking + race | Điều phối 2 lần run E2E, xác nhận 8/9 evidence | Demo chạy 2 lần có reset; test/build xanh, không hard-code dữ liệu bí mật |
+| **09:00–11:00** | Test login/PKCE/SSO, token lỗi | Test search tenant/time + Admin assignment | Test pending/payment/cancel/expiry/overlap | Chạy `docs/demo.http` trên state sạch; ghi PASS/FAIL | Không có lỗi P0 chưa phân owner |
+| **11:00–12:00** | Gửi IAM sequence & test log | Gửi search/admin sequence & DB history | Gửi payment/cancel/booking sequence & test log | Gom diagrams + sơ đồ demo; hoàn thiện docs | Diagrams, endpoint, roles, JSON thực khớp code |
+| **13:00–15:00 — G6** | Dẫn Google IAM/PKCE/SSO | Dẫn tìm kiếm phòng và Admin điều phối | Dẫn booking, payment mock, cancel/expiry | Chạy 2 lần E2E, xác nhận evidence | User B không thấy phòng khi A pending; sau cancel phòng hiện lại; không double-booking |
 | **15:00–18:00** | Sửa P0 duy nhất | Sửa P0 duy nhất | Sửa P0 duy nhất | Freeze demo và hỏi chéo 9 chủ đề (push nói rõ ngoài scope) | Không thêm feature mới; mỗi người giải thích được code của mình và luồng chung |
 
 **Quy tắc Gate:** PASS khi có PR/commit, lệnh chạy, response/log/test có thể tái hiện và bên nhận xác nhận. Không đánh dấu PASS chỉ vì agent báo đã code xong.
@@ -277,11 +294,11 @@ Lệnh bằng chứng tối thiểu: `./gradlew clean build` (Windows `gradlew.b
 | Khi nào | Bên giao → bên nhận | Cần cung cấp | Dùng để làm gì |
 |---|---|---|---|
 | D1 trước 12:00 | A → B/C/D | Google login start/callback, issuer, claims, ports, 2 frontend callback origins | D code login/callback, B/C security |
-| D1 trước 12:00 | B → C/D | Room API + hold request/response/404/409 | C viết client, D viết demo request |
+| D1 trước 12:00 | B → C/D | Search API, time filter, status response, Admin inventory/assign | C/D viết client và demo request |
 | D1 trước 12:00 | C → D | Booking API + USER/ADMIN semantics, response/error | D làm UI nút book & tests |
 | D1 cuối ngày | A → D | Hướng dẫn tạo test accounts/tokens và PKCE evidence, không kèm secret | D thử login và SSO |
-| D1 cuối ngày | B → C/D | Room IDs, seed/reset DB, room còn available | C tạo booking thật, D cố định demo data |
-| D2 trước 12:00 | B → C | Endpoint hold thật | G4 tích hợp |
+| D1 cuối ngày | B → C/D | Room IDs, seed/reset DB, room có `status=AVAILABLE` | C tạo booking thật, D cố định demo data |
+| D2 trước 12:00 | B → C | Room search và tenant/capacity validation | C gắn room/time vào booking |
 | D2 trước 15:00 | C → D | Booking end-to-end thực, response/ID status | D cập nhật demo script |
 | D2 cuối ngày | A/B/C → D | PR, test commands/reports, diagrams, actual paths | D tổng hợp minh chứng |
 | D3 trước 12:00 | Tất cả → D | Test logs cuối và known limitations | D freeze bản demo |
@@ -298,15 +315,18 @@ Lệnh bằng chứng tối thiểu: `./gradlew clean build` (Windows `gradlew.b
 | 2 | App 1 login Google | Email provision đúng role/tenant, JWT được issuer nội bộ ký | A/D |
 | 3 | PKCE S256 | Authorization request Google có `code_challenge` và `S256`; code flow kết thúc login thành công | A/D |
 | 4 | App 2 ở origin khác | Cùng browser profile, không nhập lại mật khẩu; dùng JWT mới/hợp lệ để gọi API | A/D |
-| 5 | USER GET rooms tenant 1, ADMIN thêm/sửa giá | Đúng role và tenant; USER sửa giá bị 403 | B/D |
-| 6 | USER đặt một phòng đang còn chỗ | `201 CONFIRMED`, Catalog available=false, Booking DB có row | C/D |
-| 7 | Hai request cùng lúc tranh 1 phòng còn trống | Một 201, một 409; DB không có hai booking hợp lệ cho cùng phòng | B/C/D |
-| 8 | Token tenant 2 đọc/sửa/đặt tài nguyên tenant 1 | 404/403 theo contract, không lộ dữ liệu tenant 1 | A/B/C/D |
-| 9 | Token thiếu/hỏng/hết hạn; email Google chưa provision | API 401; email chưa provision 403, không tự tạo account | A/D |
-| 10 | `./gradlew clean build` và unit tests A/B/C | Test report xanh có assertions; có test mock phù hợp | A/B/C/D |
-| 11 | Sequence diagrams + giải thích code | 3 diagrams khớp code, cả nhóm giải thích các quyết định và giới hạn | A/B/C/D |
+| 5 | USER điền thời gian/số khách/loại phòng rồi bấm Tìm kiếm | Danh sách chỉ xuất hiện sau search; status khả dụng và tenant filter đúng | B/D |
+| 6 | USER A tạo booking và tới bước thanh toán | Booking `PENDING_PAYMENT`; user B tìm cùng khung giờ không thấy phòng đó | C/D |
+| 7 | A huỷ booking trước khi hoàn tất | Booking `CANCELLED`; user B tìm lại cùng khung giờ thấy phòng trống | C/D |
+| 8 | Thanh toán mô phỏng thành công và booking được xác nhận | `PENDING_PAYMENT→CONFIRMED`; phòng tiếp tục bị ẩn trong giờ đã đặt | C/D |
+| 9 | ADMIN xem tổng số phòng và điều phối phòng cho booking | ADMIN thành công; USER gọi các API này nhận 403; không gán phòng bị overlap | B/C/D |
+| 10 | Hai request cùng lúc tranh một phòng trong cùng thời gian | Một booking thành công, request kia 409; không có hai booking active overlap | B/C/D |
+| 11 | Token tenant 2 đọc/sửa/đặt tài nguyên tenant 1 | 404/403 theo contract, không lộ dữ liệu tenant 1 | A/B/C/D |
+| 12 | Token thiếu/hỏng/hết hạn; email Google chưa provision | API 401; email chưa provision 403, không tự tạo account | A/D |
+| 13 | `./gradlew clean build` và unit tests A/B/C | Test report xanh có assertions; có test mock phù hợp | A/B/C/D |
+| 14 | Sequence diagrams + giải thích code | Diagrams khớp code, cả nhóm giải thích quyết định và giới hạn | A/B/C/D |
 
-**Phải chuẩn bị state sạch:** tạo `room` riêng `available=true` cho test cạnh tranh hoặc reset seed giữa các đoạn; không dùng lại phòng đã đặt ở bước 6. Tài khoản tenant 2 nên test trong browser profile tách biệt để không nhầm session Google; không gửi token thật vào Git/evidence.
+**Phải chuẩn bị state sạch:** dùng cùng một khoảng giờ test rõ ràng; reset/cancel booking giữa các lần chạy. Sau khi test A pending, chạy search bằng B; sau cancel, chạy lại cùng search và xác nhận phòng xuất hiện. Tài khoản tenant 2 nên test trong browser profile tách biệt; không gửi token thật vào Git/evidence.
 
 **Quy ước tài liệu cho D:**
 
@@ -351,7 +371,7 @@ Cấu trúc trên là **gợi ý**, phải kiểm tra thư mục thật trong re
 
 ## 11. Thứ tự ưu tiên và nguyên tắc cắt giảm
 
-**Không cắt** trong 3 ngày: Google login thật, PKCE S256 minh chứng, SSO 2 trang, tenant isolation, Flyway, unit test, sequence diagram, booking `CONFIRMED`, atomic hold.
+**Không cắt** trong 3 ngày: Google login thật, PKCE S256 minh chứng, SSO 2 trang, tenant isolation, Flyway, unit test, sequence diagram, time-based search, giữ chỗ khi `PENDING_PAYMENT`, cancel/expiry giải phóng, Admin-only inventory/assignment.
 
 **Có thể đơn giản hóa khi trễ:**
 
@@ -360,7 +380,7 @@ Cấu trúc trên là **gợi ý**, phải kiểm tra thư mục thật trong re
 3. Các báo cáo/trang dashboard, test automation UI nâng cao; giữ `docs/demo.http` và test Gradle bắt buộc.
 4. Nếu lỗi Gateway không thể giải quyết kịp, chỉ dùng service trực tiếp **khi cả nhóm chấp thuận**, vẫn verify JWT ở B/C, và ghi rõ Gateway đã bị cắt khỏi demo; khi đó chủ đề REST/auth vẫn có nhưng phải báo thay đổi kiến trúc.
 
-**Không thêm** cancel, push, payment, idempotency, day-based inventory, external auth service, UI framework hoặc tính năng AI dù Codex đề xuất. **Không nâng cấp dependency giữa dự án khi không cần**.
+Không mở rộng thanh toán mô phỏng thành cổng thanh toán thật; không thêm refund tự động, push, idempotency, day-based inventory, external auth service, UI framework hoặc tính năng AI. **Không nâng cấp dependency giữa dự án khi không cần**.
 
 **Blocker Google Cloud:** cần Client ID/Secret và cấu hình OAuth consent/test users, các email Google thật được provision, đúng redirect URI. Nếu chưa có, A mock IAM cho unit tests và D dựng UI theo contract; nhưng **G6 không được ghi PASS ở Google SSO/PKCE khi chưa login Google thật**.
 
@@ -369,8 +389,8 @@ Cấu trúc trên là **gợi ý**, phải kiểm tra thư mục thật trong re
 ## 12. Definition of Done (DoD) cho từng người
 
 - **A PASS:** Build/Compose chạy; IAM Google login + pre-provision 403; PKCE S256 thực; SSO session cho 2 frontend; JWT RS256 + JWKS/claims; A/B/C verify JWT; Gateway không route internal; IAM/security unit tests; diagram.
-- **B PASS:** Flyway Catalog; room list/add/price theo role+tenant; atomic hold với 200/404/409; không oversell; test tenant và race; diagram.
-- **C PASS:** Flyway Booking; POST 201 CONFIRMED; GET list/id đúng role/owner/tenant; forward JWT sang B; không tạo booking nếu hold fail; unit tests; diagram.
+- **B PASS:** Flyway Catalog; search chỉ sau submit với thời gian/tiêu chí; response status đúng theo interval; Admin-only room summary/assign; tenant isolation; diagram.
+- **C PASS:** Flyway Booking; POST tạo `PENDING_PAYMENT`; payment mock xác nhận; cancel/expiry giải phóng giờ; overlap trả 409; GET đúng role/owner/tenant; Admin reassignment hợp lệ; unit tests; diagram.
 - **D PASS:** 2 HTML khác origin dùng Google login thật và demo các thao tác; `docs/demo.http` đầy đủ các case 401/403/404/409/201; `demo-script`, `test-evidence`, diagrams và README nhất quán; demo từ state sạch chạy được 2 lần; không sửa file owner khác để né bug.
 - **Cả nhóm PASS:** Từng người giải thích được code/PR mình, chủ đề mình và ít nhất hai luồng kỹ thuật khác; commit/PR có người review, test/build xanh, không secret/PII trong repo.
 
@@ -406,7 +426,7 @@ sequenceDiagram
     participant Browser as Browser / App 1
     participant IAM as iam-service
     participant Google
-    participant DB as hotelbooking (tenant/app_user)
+    participant DB as hotelbooking (tenant/users)
     participant App2 as HTML App 2
 
     Browser->>IAM: GET /auth/start?app=app1
@@ -420,7 +440,7 @@ sequenceDiagram
         DB-->>IAM: Not found
         IAM-->>Browser: 403 Forbidden
     else Email hợp lệ
-        DB-->>IAM: app_user, tenant_id, role
+        DB-->>IAM: users, tenant_id, role
         IAM->>IAM: Mint JWT nội bộ RS256
         IAM-->>Browser: Redirect app1/callback#token=JWT
     end
@@ -439,13 +459,13 @@ sequenceDiagram
     participant Catalog as catalog-service
     participant DB as hotelbooking (room)
 
-    UI->>Gateway: GET /api/rooms (Bearer JWT)
+    UI->>Gateway: GET /api/rooms/search?checkIn&checkOut&guestCount (Bearer JWT)
     Gateway->>Gateway: Verify JWT
-    Gateway->>Catalog: GET /rooms + Bearer JWT
+    Gateway->>Catalog: GET /rooms/search + Bearer JWT
     Catalog->>Catalog: Verify JWT, extract tenant_id
-    Catalog->>DB: SELECT room WHERE tenant_id = JWT.tenant_id
-    DB-->>Catalog: Rooms đúng tenant
-    Catalog-->>UI: 200 rooms
+    Catalog->>DB: SELECT ACTIVE rooms tenant + criteria, exclude overlapping active bookings
+    DB-->>Catalog: Rooms trống trong khoảng giờ đó
+    Catalog-->>UI: 200 results with status=AVAILABLE
 
     UI->>Gateway: PUT /api/rooms/{id}/price (Bearer JWT)
     Gateway->>Catalog: PUT /rooms/{id}/price + Bearer JWT
@@ -459,9 +479,18 @@ sequenceDiagram
             Catalog-->>UI: 200
         end
     end
+
+    UI->>Gateway: GET /api/admin/rooms/summary (Bearer JWT)
+    Gateway->>Catalog: Forward request + JWT
+    alt USER
+        Catalog-->>UI: 403 Forbidden
+    else ADMIN
+        Catalog->>DB: Count total/maintenance/available/booked for requested time window
+        Catalog-->>UI: 200 tenant room inventory summary
+    end
 ```
 
-### A3. Booking tối giản và hai yêu cầu tranh phòng
+### A3. Hai yêu cầu cùng tranh một phòng trong cùng khoảng giờ
 
 ```mermaid
 sequenceDiagram
@@ -469,26 +498,59 @@ sequenceDiagram
     participant U2 as User / Request B
     participant Gateway as api-gateway
     participant Booking as booking-service
-    participant Catalog as catalog-service
-    participant RoomDB as hotelbooking (room)
     participant BookingDB as hotelbooking (booking)
 
-    U1->>Gateway: POST /api/bookings {roomId}
-    U2->>Gateway: POST /api/bookings {roomId}
+    U1->>Gateway: POST /api/bookings {roomId, checkIn, checkOut}
+    U2->>Gateway: POST /api/bookings {roomId, checkIn, checkOut}
     Gateway->>Booking: Forward A + Bearer JWT
     Gateway->>Booking: Forward B + Bearer JWT
-    Booking->>Catalog: POST /internal/rooms/{id}/hold (A JWT)
-    Booking->>Catalog: POST /internal/rooms/{id}/hold (B JWT)
-    Catalog->>RoomDB: Conditional UPDATE available=true -> false (A)
-    Catalog->>RoomDB: Conditional UPDATE available=true -> false (B)
-    Note over Catalog,RoomDB: Atomic UPDATE: chỉ một yêu cầu cập nhật được row
-    RoomDB-->>Catalog: A: 1 row / B: 0 row
-    Catalog-->>Booking: A: 200 / B: 409
-    Booking->>BookingDB: INSERT booking A status CONFIRMED
-    BookingDB-->>Booking: Saved
-    Booking-->>Gateway: A: 201 / B: 409
-    Gateway-->>U1: 201 CONFIRMED
+    Booking->>BookingDB: INSERT A status PENDING_PAYMENT
+    Booking->>BookingDB: INSERT B status PENDING_PAYMENT
+    Note over Booking,BookingDB: Exclusion constraint: chỉ một booking active được giữ cùng room/time
+    BookingDB-->>Booking: A: inserted / B: overlap violation
+    Booking-->>Gateway: A: 201 PENDING_PAYMENT / B: 409
+    Gateway-->>U1: 201 PENDING_PAYMENT
     Gateway-->>U2: 409 Conflict
 ```
 
-**Lưu ý sơ đồ A3:** giả định request A thắng, B thua; trong test thực tế bất kỳ request nào có thể thắng, nhưng **tổng luôn phải là 1 thành công + 1 xung đột**. Nếu cả hai đều thất bại vì data đã bị giữ trước đó, phải reset dữ liệu test chứ không ghi PASS.
+**Lưu ý sơ đồ A3:** request nào thắng cũng được; tổng phải là 1 booking `PENDING_PAYMENT` và 1 lỗi `409`. Booking đang chờ thanh toán đã giữ phòng.
+
+### A4. A pending/cancel và kết quả tìm kiếm của B
+
+```mermaid
+sequenceDiagram
+    participant A as User A
+    participant B as User B
+    participant Gateway as api-gateway
+    participant Catalog as catalog-service
+    participant Booking as booking-service
+    participant DB as hotelbooking database
+
+    A->>Gateway: Search criteria + time window
+    Gateway->>Catalog: Search rooms
+    Catalog->>DB: Find room with no overlapping active booking
+    DB-->>A: Room R status AVAILABLE
+    A->>Gateway: POST booking R + checkIn/checkOut
+    Gateway->>Booking: Create PENDING_PAYMENT
+    Booking->>DB: INSERT active booking (holds time window)
+    DB-->>Booking: Created
+    Booking-->>A: 201 PENDING_PAYMENT / proceed to payment
+
+    B->>Gateway: Search same criteria + time window
+    Gateway->>Catalog: Search rooms
+    Catalog->>DB: Exclude R because A has PENDING_PAYMENT overlap
+    DB-->>B: R not in results
+
+    A->>Gateway: POST /api/bookings/{id}/cancel
+    Gateway->>Booking: Verify owner and cancel
+    Booking->>DB: UPDATE status = CANCELLED
+    DB-->>Booking: Updated; active time hold released
+    Booking-->>A: 200 CANCELLED
+
+    B->>Gateway: Search same criteria + time window again
+    Gateway->>Catalog: Search rooms
+    Catalog->>DB: R has no overlapping active booking
+    DB-->>B: Room R status AVAILABLE
+```
+
+Kết quả của lần tìm kiếm đầu tiên không được cache thành quyền đặt. Khi A huỷ, search mới của B sẽ tính lại availability cho đúng khoảng giờ.
