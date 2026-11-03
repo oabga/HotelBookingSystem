@@ -422,12 +422,12 @@ sequenceDiagram
     else Email hợp lệ
         DB-->>IAM: app_user, tenant_id, role
         IAM->>IAM: Mint JWT nội bộ RS256
-        IAM-->>Browser: Redirect app1/callback#token=JWT
+        IAM-->>Browser: Redirect app1/callback, JWT trong URL fragment
     end
     Browser->>App2: Mở origin/port thứ hai, cùng browser profile
     App2->>IAM: GET /auth/start?app=app2
-    Note over App2,Google: Tái sử dụng session IAM/Google; không nhập lại mật khẩu nếu session hợp lệ
-    IAM-->>App2: Redirect app2/callback#token=JWT hợp lệ
+    Note over App2,Google: Tái sử dụng session IAM/Google - không nhập lại mật khẩu nếu session hợp lệ
+    IAM-->>App2: Redirect app2/callback, JWT hợp lệ trong URL fragment
 ```
 
 ### A2. Tenant isolation và phân quyền phòng
