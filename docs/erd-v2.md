@@ -2,7 +2,7 @@
 
 Tài liệu này mô tả database theo flow: **khách chọn khách sạn, ngày nhận và trả phòng, bấm Tìm kiếm → xem các loại phòng còn trống → đặt phòng → thanh toán mô phỏng hoặc huỷ**.
 
-> **Trạng thái:** thiết kế đề xuất, chưa có trong migration và code (xem §12). `room_inventory` đang nằm trong danh sách không làm ở `iam-google-sso-demo-plan-v2.md` §1.2, nên cả nhóm phải đồng ý đổi scope trước khi triển khai.
+> **Trạng thái:** thiết kế đề xuất, chưa có trong migration và code (xem §12). Thiết kế này dùng tồn kho theo đêm trong `room_inventory`, khớp scope hiện hành của `iam-google-sso-demo-plan-v2.md` và `api-contract.md`.
 >
 > Một PostgreSQL database `hotelbooking`, schema `public`. Giá phòng và dữ liệu mẫu chỉ để minh họa.
 
@@ -33,16 +33,15 @@ erDiagram
         BIGINT id PK
         BIGINT tenant_id FK
         VARCHAR name
-        VARCHAR city
+        VARCHAR address "địa chỉ khách sạn"
     }
     ROOM_TYPE {
         BIGINT id PK
         BIGINT tenant_id FK
         BIGINT hotel_id FK
-        VARCHAR code "duy nhất trong khách sạn"
         VARCHAR name
         INT capacity "số khách mỗi phòng"
-        NUMERIC base_price "giá mỗi đêm"
+        NUMERIC base_price "giá một phòng mỗi đêm"
         INT total_rooms "số phòng mặc định khi mở bán"
     }
     ROOM_INVENTORY {
@@ -128,28 +127,28 @@ sequenceDiagram
 
 ## 3. Dữ liệu ban đầu
 
-Giữ nguyên số ID loại phòng so với ID phòng hiện tại (`1`–`5`) để ít phải sửa tài liệu kiểm thử. ID chỉ đúng trên DB vừa tạo sạch.
+Giữ nguyên các ID loại phòng hiện có (`1`–`6`) để ít phải sửa tài liệu kiểm thử. ID chỉ đúng trên DB vừa tạo sạch.
 
 **`hotel`**
 
-| id | tenant_id | name | city |
+| id | tenant_id | name | address |
 |---|---|---|---|
-| 1 | 1 | Demo Hotel A - Hà Nội | Hà Nội |
-| 2 | 2 | Demo Hotel B - TP.HCM | TP.HCM |
-| 3 | 1 | Demo Hotel A - Đà Nẵng | Đà Nẵng |
+| 1 | 1 | Demo Hotel A - Hà Nội | 12 Hàng Trống, Hoàn Kiếm, Hà Nội |
+| 2 | 2 | Demo Hotel B - TP.HCM | 25 Nguyễn Huệ, Quận 1, TP.HCM |
+| 3 | 1 | Demo Hotel A - Đà Nẵng | 08 Bạch Đằng, Hải Châu, Đà Nẵng |
 
 Tenant 1 có hai khách sạn để bước chọn khách sạn có ý nghĩa khi demo. User chỉ thấy khách sạn trong tenant của mình.
 
 **`room_type`**
 
-| id | tenant_id | hotel_id | code | name | capacity | base_price | total_rooms | Dùng cho |
+| id | tenant_id | hotel_id | name | capacity | base_price (mỗi phòng/đêm) | total_rooms | Dùng cho |
 |---|---|---|---|---|---|---|---|---|
-| 1 | 1 | 1 | STD | Standard | 2 | 500,000 | 3 | Luồng chính |
-| 2 | 1 | 1 | DLX | Deluxe | 2 | 900,000 | 4 | Luồng chính |
-| 3 | 2 | 2 | STD | Standard | 2 | 450,000 | 5 | Kiểm thử khác tenant |
-| 4 | 2 | 2 | DLX | Deluxe | 2 | 850,000 | 6 | Kiểm thử khác tenant |
-| 5 | 1 | 3 | RACE | Race Test | 2 | 500,000 | 1 | Chỉ dùng cho race test |
-| 6 | 1 | 3 | STD | Standard | 2 | 600,000 | 5 | Luồng chính |
+| 1 | 1 | 1 | Standard | 2 | 500,000 | 3 | Luồng chính |
+| 2 | 1 | 1 | Deluxe | 2 | 900,000 | 4 | Luồng chính |
+| 3 | 2 | 2 | Standard | 2 | 450,000 | 5 | Kiểm thử khác tenant |
+| 4 | 2 | 2 | Deluxe | 2 | 850,000 | 6 | Kiểm thử khác tenant |
+| 5 | 1 | 3 | Race Test | 2 | 500,000 | 1 | Chỉ dùng cho race test |
+| 6 | 1 | 3 | Standard | 2 | 600,000 | 5 | Luồng chính |
 
 **`room_inventory`**
 
@@ -168,22 +167,22 @@ Ngày cố định giúp `docs/demo.http` và test cho cùng một kết quả. 
 
 | id | Loại phòng | check_in | check_out | room_count | total_amount |
 |---|---|---|---|---|---|
-| 1 | STD | 21/11 | 23/11 | 1 | 1,000,000 |
-| 2 | STD | 24/11 | 26/11 | 1 | 1,000,000 |
-| 3 | STD | 25/11 | 27/11 | 1 | 1,000,000 |
-| 4 | DLX | 25/11 | 26/11 | 4 | 3,600,000 |
+| 1 | Standard | 21/11 | 23/11 | 1 | 1,000,000 |
+| 2 | Standard | 24/11 | 26/11 | 1 | 1,000,000 |
+| 3 | Standard | 25/11 | 27/11 | 1 | 1,000,000 |
+| 4 | Deluxe | 25/11 | 26/11 | 4 | 3,600,000 |
 
 Tồn kho tương ứng:
 
 | Loại phòng | stay_date | total | sold | Còn trống |
 |---|---|---|---|---|
-| STD | 23/11 | 3 | 0 | 3 |
-| STD | 24/11 | 3 | 1 | 2 |
-| STD | 25/11 | 3 | 2 | 1 |
-| STD | 26/11 | 3 | 1 | 2 |
-| STD | 27/11 | 3 | 0 | 3 |
-| DLX | 24/11 | 4 | 0 | 4 |
-| DLX | 25/11 | 4 | 4 | 0 |
+| Standard | 23/11 | 3 | 0 | 3 |
+| Standard | 24/11 | 3 | 1 | 2 |
+| Standard | 25/11 | 3 | 2 | 1 |
+| Standard | 26/11 | 3 | 1 | 2 |
+| Standard | 27/11 | 3 | 0 | 3 |
+| Deluxe | 24/11 | 4 | 0 | 4 |
+| Deluxe | 25/11 | 4 | 4 | 0 |
 
 ## 4. Flow tìm kiếm
 
@@ -196,7 +195,7 @@ GET /api/hotels/1/availability?checkIn=2026-11-24&checkOut=2026-11-26
 Kỳ ở này có **2 đêm: 24 và 25/11**. Flow này chỉ đọc dữ liệu, chưa giữ phòng nào.
 
 ```sql
-SELECT rt.id, rt.code, rt.name, rt.capacity, rt.base_price,
+SELECT rt.id, rt.name, rt.capacity, rt.base_price,
        MIN(i.total - i.sold) AS available_rooms
 FROM room_type rt
 JOIN room_inventory i
@@ -223,7 +222,6 @@ Response `200`:
 [
   {
     "roomTypeId": 1,
-    "code": "STD",
     "name": "Standard",
     "capacity": 2,
     "pricePerNight": 500000.00,
@@ -342,16 +340,20 @@ Cập nhật được 0 dòng thì đơn đã huỷ, đã hết hạn hoặc đ�
 
 ```sql
 UPDATE booking
-SET status = 'CANCELLED'      -- job hết hạn dùng 'EXPIRED'
+SET status = 'CANCELLED'
 WHERE id = :id AND tenant_id = :tenantId
-  AND status IN ('PENDING_PAYMENT', 'CONFIRMED');  -- job hết hạn chỉ xét PENDING_PAYMENT
+  AND user_email = :email
+  AND status = 'PENDING_PAYMENT';  -- chỉ chủ đơn huỷ khi đang chờ thanh toán
+
+-- Job hết hạn dùng status = 'EXPIRED' và chỉ xét PENDING_PAYMENT.
 
 -- Nếu đổi được 1 dòng: chạy cho từng đêm, theo ngày tăng dần
 UPDATE room_inventory
 SET sold = sold - :roomCount
 WHERE tenant_id = :tenantId
   AND room_type_id = :roomTypeId
-  AND stay_date = :stayDate;
+  AND stay_date = :stayDate
+  AND sold >= :roomCount;
 ```
 
 Huỷ đơn 5 đưa `sold` đêm 24/11 về 1 và đêm 25/11 về 2. Không xoá lịch sử booking. Job hết hạn tìm đơn bằng index `idx_booking_pending_expiry` và xử lý mỗi đơn trong một transaction riêng.
@@ -443,7 +445,7 @@ CREATE TABLE hotel (
     id        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     tenant_id BIGINT       NOT NULL REFERENCES tenant (id),
     name      VARCHAR(100) NOT NULL,
-    city      VARCHAR(100) NOT NULL,
+    address   VARCHAR(255) NOT NULL,
     CONSTRAINT uq_hotel_tenant_id UNIQUE (tenant_id, id)
 );
 
@@ -451,13 +453,11 @@ CREATE TABLE room_type (
     id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     tenant_id   BIGINT         NOT NULL,
     hotel_id    BIGINT         NOT NULL,
-    code        VARCHAR(20)    NOT NULL,
     name        VARCHAR(100)   NOT NULL,
     capacity    INT            NOT NULL,
-    base_price  NUMERIC(10, 2) NOT NULL,
+    base_price  NUMERIC(10, 2) NOT NULL, -- giá một phòng mỗi đêm
     total_rooms INT            NOT NULL,
     CONSTRAINT uq_room_type_tenant_id UNIQUE (tenant_id, id),
-    CONSTRAINT uq_room_type_hotel_code UNIQUE (hotel_id, code),
     CONSTRAINT fk_room_type_hotel_same_tenant
         FOREIGN KEY (tenant_id, hotel_id) REFERENCES hotel (tenant_id, id),
     CONSTRAINT chk_room_type_capacity CHECK (capacity > 0),
@@ -524,7 +524,7 @@ CREATE INDEX idx_booking_pending_expiry ON booking (payment_expires_at)
 | `GET /api/admin/hotels/{hotelId}/inventory?checkIn&checkOut` | Catalog | `ADMIN` | Xem `total`, `sold`, còn trống theo từng đêm |
 | `POST /api/bookings` | Booking | `USER` | Đặt phòng (§5) |
 | `POST /api/bookings/{id}/payment` | Booking | `USER` là chủ đơn | Thanh toán mô phỏng (§6) |
-| `POST /api/bookings/{id}/cancel` | Booking | `USER` là chủ đơn, `ADMIN` cùng tenant | Huỷ đơn (§6) |
+| `POST /api/bookings/{id}/cancel` | Booking | `USER` là chủ đơn | Huỷ đơn chỉ khi `PENDING_PAYMENT` (§6) |
 | `GET /api/bookings`, `GET /api/bookings/{id}` | Booking | `USER`, `ADMIN` | Xem đơn, quyền như hiện tại |
 
 `USER` chỉ thấy `availableRooms` trong kết quả tìm kiếm, không thấy `total` và `sold`.
