@@ -5,7 +5,7 @@ spring:
   application:
     name: catalog-service
   datasource:
-    url: jdbc:postgresql://localhost:5432/catalog_db
+    url: jdbc:postgresql://localhost:5432/hotelbooking
     username: hotelbooking
     password: hotelbooking
   jpa:
@@ -14,8 +14,11 @@ spring:
     open-in-view: false
   flyway:
     locations: classpath:db/migration
+    table: flyway_schema_history_catalog
   security:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: http://localhost:8180/realms/hotelbooking
+          # iam-service is not a full OIDC Authorization Server (it has no
+          # /.well-known/openid-configuration), so use its JWKS endpoint directly.
+          jwk-set-uri: http://localhost:8084/.well-known/jwks.json
