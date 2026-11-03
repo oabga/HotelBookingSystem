@@ -5,7 +5,7 @@ spring:
   application:
     name: booking-service
   datasource:
-    url: jdbc:postgresql://localhost:5432/booking_db
+    url: jdbc:postgresql://localhost:5432/hotelbooking
     username: hotelbooking
     password: hotelbooking
   jpa:
@@ -14,11 +14,15 @@ spring:
     open-in-view: false
   flyway:
     locations: classpath:db/migration
+    table: flyway_schema_history_booking
   security:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: http://localhost:8180/realms/hotelbooking
+          # iam-service không phải OIDC Authorization Server đầy đủ (không có
+          # /.well-known/openid-configuration) nên dùng jwk-set-uri trực tiếp,
+          # không dùng issuer-uri (sẽ cố gọi discovery và fail).
+          jwk-set-uri: http://localhost:8084/.well-known/jwks.json
 
 services:
   catalog-service:

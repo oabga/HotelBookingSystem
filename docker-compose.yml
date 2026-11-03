@@ -1,4 +1,7 @@
 services:
+  # 1 database "hotelbooking" chung cho iam-service, catalog-service, booking-service
+  # (xem docs/iam-google-sso-demo-plan-v2.md §2) — POSTGRES_DB bên dưới tự tạo DB này,
+  # không cần init script tạo thêm database nào khác.
   postgres:
     image: postgres:16
     container_name: hotelbooking-postgres
@@ -10,22 +13,14 @@ services:
       - "5432:5432"
     volumes:
       - hotelbooking-pgdata:/var/lib/postgresql/data
-      - ./docker/postgres-init:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hotelbooking -d hotelbooking"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-  keycloak:
-    image: quay.io/keycloak/keycloak:25.0
-    container_name: hotelbooking-keycloak
-    command: start-dev
-    environment:
-      KC_BOOTSTRAP_ADMIN_USERNAME: admin
-      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
-    ports:
-      - "8180:8080"
+# Không còn service Keycloak — plan v2 dùng Google làm Identity Provider,
+# iam-service (tự code) là OAuth2 Client + tự mint/verify JWT nội bộ.
 
 volumes:
   hotelbooking-pgdata:

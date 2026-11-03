@@ -8,25 +8,25 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: http://localhost:8180/realms/hotelbooking
+          # iam-service không phải OIDC Authorization Server đầy đủ (không có
+          # /.well-known/openid-configuration) nên dùng jwk-set-uri trực tiếp,
+          # không dùng issuer-uri (sẽ cố gọi discovery và fail).
+          jwk-set-uri: http://localhost:8084/.well-known/jwks.json
   cloud:
     gateway:
       routes:
+        # Theo API contract đã chốt ở docs/iam-google-sso-demo-plan-v2.md §4.2:
+        # /api/rooms/** -> /rooms/** (catalog-service), /api/bookings/** -> /bookings/** (booking-service).
+        # Login/callback/JWKS gọi trực tiếp iam-service :8084, không qua gateway.
         - id: catalog-service
           uri: http://localhost:8081
           predicates:
-            - Path=/api/catalog/**
+            - Path=/api/rooms/**
           filters:
-            - StripPrefix=2
+            - StripPrefix=1
         - id: booking-service
           uri: http://localhost:8082
           predicates:
             - Path=/api/bookings/**
-          filters:
-            - StripPrefix=1
-        - id: notification-service
-          uri: http://localhost:8083
-          predicates:
-            - Path=/api/notifications/**
           filters:
             - StripPrefix=1

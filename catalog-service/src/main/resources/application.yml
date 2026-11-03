@@ -19,6 +19,7 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          # iam-service is not a full OIDC Authorization Server (it has no
-          # /.well-known/openid-configuration), so use its JWKS endpoint directly.
+          # iam-service không phải OIDC Authorization Server đầy đủ (không có
+          # /.well-known/openid-configuration) nên dùng jwk-set-uri trực tiếp,
+          # không dùng issuer-uri (sẽ cố gọi discovery và fail).
           jwk-set-uri: http://localhost:8084/.well-known/jwks.json

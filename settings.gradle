@@ -14,6 +14,7 @@ rootProject.name = 'HotelBookingSystem'
 include(
     'api-gateway',
     'common-security',
+    'iam-service',
     'catalog-service',
     'booking-service',
     'notification-service'
