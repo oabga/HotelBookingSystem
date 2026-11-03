@@ -1,174 +1,560 @@
-# ERD & Database Design — tìm phòng theo thời gian, booking và huỷ
+# ERD và flow tìm kiếm, đặt phòng theo `room_inventory`
 
-> Một PostgreSQL database `hotelbooking`, schema `public`. Tình trạng trống được xác định theo khoảng thời gian người dùng tìm kiếm (`check_in`, `check_out`). Booking đang chờ thanh toán cũng giữ phòng; huỷ booking giải phóng đúng khoảng thời gian đó.
+Tài liệu này mô tả database theo flow: **khách chọn khách sạn, ngày nhận và trả phòng, bấm Tìm kiếm → xem các loại phòng còn trống → đặt phòng → thanh toán mô phỏng hoặc huỷ**.
 
-## 1. Mô hình dữ liệu
+> **Trạng thái:** thiết kế đề xuất, chưa có trong migration và code (xem §12). `room_inventory` đang nằm trong danh sách không làm ở `iam-google-sso-demo-plan-v2.md` §1.2, nên cả nhóm phải đồng ý đổi scope trước khi triển khai.
+>
+> Một PostgreSQL database `hotelbooking`, schema `public`. Giá phòng và dữ liệu mẫu chỉ để minh họa.
+
+## 1. ERD
 
 ```mermaid
 erDiagram
-    TENANT ||--o{ USERS : "có"
-    TENANT ||--o{ ROOM : "sở hữu"
+    TENANT ||--o{ APP_USER : "có"
+    TENANT ||--o{ HOTEL : "sở hữu"
     TENANT ||--o{ BOOKING : "sở hữu"
-    ROOM ||--o{ BOOKING : "được giữ/đặt"
-    USERS ||--o{ BOOKING : "đặt bởi email"
+    HOTEL ||--o{ ROOM_TYPE : "có"
+    ROOM_TYPE ||--o{ ROOM_INVENTORY : "có tồn theo đêm"
+    ROOM_TYPE ||--o{ BOOKING : "được đặt qua"
+    APP_USER ||--o{ BOOKING : "đặt bởi email"
 
     TENANT {
         BIGINT id PK
         VARCHAR name
     }
-    USERS {
+    APP_USER {
         BIGINT id PK
-        VARCHAR email "UNIQUE, NOT NULL, lowercase"
+        VARCHAR email UK "chữ thường"
         BIGINT tenant_id FK
         VARCHAR role "USER hoặc ADMIN"
-        VARCHAR google_sub "nullable, UNIQUE"
+        VARCHAR google_sub UK "có thể null"
     }
-    ROOM {
+    HOTEL {
         BIGINT id PK
         BIGINT tenant_id FK
         VARCHAR name
-        VARCHAR room_type
-        INTEGER capacity
-        NUMERIC price
-        VARCHAR operational_status "ACTIVE hoặc MAINTENANCE"
+        VARCHAR city
+    }
+    ROOM_TYPE {
+        BIGINT id PK
+        BIGINT tenant_id FK
+        BIGINT hotel_id FK
+        VARCHAR code "duy nhất trong khách sạn"
+        VARCHAR name
+        INT capacity "số khách mỗi phòng"
+        NUMERIC base_price "giá mỗi đêm"
+        INT total_rooms "số phòng mặc định khi mở bán"
+    }
+    ROOM_INVENTORY {
+        BIGINT tenant_id PK, FK
+        BIGINT room_type_id PK, FK
+        DATE stay_date PK "một dòng là một đêm"
+        INT total "số phòng bán được đêm đó"
+        INT sold "số phòng đã giữ hoặc đã bán"
     }
     BOOKING {
         BIGINT id PK
         BIGINT tenant_id FK
-        BIGINT room_id FK
-        VARCHAR email FK
-        TIMESTAMPTZ check_in
-        TIMESTAMPTZ check_out
+        BIGINT room_type_id FK
+        VARCHAR user_email FK
+        DATE check_in "đêm đầu tiên"
+        DATE check_out "ngày trả phòng, không tính đêm này"
+        INT room_count
+        NUMERIC total_amount "chốt tại lúc đặt"
         VARCHAR status "PENDING_PAYMENT, CONFIRMED, CANCELLED, EXPIRED"
-        BIGINT assigned_by FK
+        TIMESTAMPTZ payment_expires_at
         TIMESTAMPTZ created_at
     }
 ```
 
-**Tên bảng user:** nghiệp vụ gọi là `user`; tên vật lý PostgreSQL dùng `users` để tránh đụng từ khóa `USER`. Booking dùng cột `email`, không dùng tên `user_email`.
-
-| Bảng | Service sở hữu | Trường/ràng buộc chính |
+| Bảng | Service tạo migration | Ai được ghi |
 |---|---|---|
-| `tenant` | IAM | `id`, `name` |
-| `users` | IAM | `id`, `email` unique/lowercase, `tenant_id`, `role`, `google_sub`; unique `(tenant_id, email)` |
-| `room` | Catalog | `id`, `tenant_id`, `name`, `room_type`, `capacity`, `price`, `operational_status` (`ACTIVE`/`MAINTENANCE`); unique `(tenant_id, id)` |
-| `booking` | Booking | `id`, `tenant_id`, `room_id`, `email`, `check_in`, `check_out`, `status`, `assigned_by`, `created_at`; FK ghép giữ tenant nhất quán |
+| `tenant`, `app_user` | IAM | IAM |
+| `hotel`, `room_type` | Catalog | Catalog |
+| `room_inventory` | Catalog | Catalog thêm dòng và sửa `total`. Booking chỉ sửa `sold` |
+| `booking` | Booking | Booking |
 
-`room.operational_status` là tình trạng vận hành của phòng (`ACTIVE`/`MAINTENANCE`); phòng bảo trì không được bán. Trong response tìm kiếm, trường `status` là `AVAILABLE`/`BOOKED` được tính theo khung giờ yêu cầu. Không lưu trạng thái trống tĩnh trên room vì phòng có thể đã đặt buổi sáng nhưng trống buổi tối. `checkIn`/`checkOut` là tiêu chí tìm kiếm và nằm trên booking; không phải cột cố định của room.
+**Ba điểm dễ nhầm:**
 
-## 2. Tìm kiếm phòng theo lựa chọn và thời gian
+- `booking` và `room_inventory` không nối trực tiếp với nhau. Một đơn gắn với các đêm qua `room_type_id` và khoảng ngày, nên service phải cập nhật cả hai bảng trong cùng một transaction.
+- Đơn vị bán là **loại phòng**, không phải phòng cụ thể. Bảng `room` cũ, cột `operational_status` và `assigned_by` được bỏ. Muốn ngừng bán một số phòng để bảo trì thì giảm `room_inventory.total` của các đêm đó.
+- "Còn trống" là `total - sold`, chỉ tính khi đọc, không lưu thành cột.
 
-Người dùng chưa thấy danh sách phòng ngay khi mở trang. UI thu thập các tiêu chí bắt buộc rồi chỉ gọi tìm kiếm sau khi người dùng bấm **Tìm kiếm**:
+## 2. Mỗi bước dùng bảng nào
 
-- `checkIn` và `checkOut` (timestamp có timezone; `checkOut > checkIn`);
-- số khách (`guestCount`);
-- loại phòng nếu người dùng chọn (`roomType`), cùng các bộ lọc tùy chọn được UI cung cấp.
+| Bước | `hotel` | `room_type` | `room_inventory` | `booking` |
+|---|---|---|---|---|
+| 1. Mở form, chọn khách sạn | Đọc | | | |
+| 2. Bấm Tìm kiếm | Đọc | Đọc | Đọc | |
+| 3. Bấm Đặt | | Đọc | **Sửa** `sold` | **Thêm** |
+| 4a. Thanh toán thành công | | | | **Sửa** |
+| 4b. Huỷ hoặc quá hạn thanh toán | | | **Sửa** `sold` | **Sửa** |
 
-Ví dụ: `GET /api/rooms/search?checkIn=2026-11-10T14:00:00%2B07:00&checkOut=2026-11-12T11:00:00%2B07:00&guestCount=2&roomType=DELUXE`.
+`tenant_id` luôn lấy từ JWT đã xác minh, không lấy từ dữ liệu client gửi.
 
-Catalog chỉ trả phòng tenant hiện tại có `room.operational_status='ACTIVE'`, đủ sức chứa/đúng loại phòng, và **không có booking đang giữ hoặc đã xác nhận chồng thời gian**. Response phòng tìm kiếm có `status='AVAILABLE'`. User B không nhận được phòng đang nằm trong booking `PENDING_PAYMENT` của A; sau khi booking A được huỷ, phòng xuất hiện lại trong kết quả nếu các tiêu chí và thời gian vẫn khớp.
+```mermaid
+sequenceDiagram
+    autonumber
+    actor K as Khách
+    participant C as catalog-service
+    participant B as booking-service
+    participant DB as hotelbooking
 
-## 3. Trạng thái booking, thanh toán và huỷ
-
-Các trạng thái:
-
-| Booking status | Có giữ khoảng thời gian không? | Ý nghĩa |
-|---|---:|---|
-| `PENDING_PAYMENT` | Có | User đã chọn phòng và đang thanh toán; ẩn phòng khỏi kết quả tìm kiếm trùng thời gian |
-| `CONFIRMED` | Có | Thanh toán thành công/booking được xác nhận |
-| `CANCELLED` | Không | Đã huỷ; giải phóng khoảng thời gian để user khác tìm và đặt |
-| `EXPIRED` | Không | Hết thời hạn thanh toán; giải phóng phòng |
-
-Room có `operational_status='MAINTENANCE'` sẽ không hiện trong kết quả tìm kiếm kể cả khi không có booking. `ACTIVE` chỉ có nghĩa phòng vận hành được; availability vẫn phải được tính theo ngày/giờ yêu cầu.
-
-Flow chính:
-
-1. User chọn tiêu chí và bấm Tìm kiếm; chọn một phòng `AVAILABLE` trong khoảng thời gian mong muốn.
-2. Booking service kiểm tra quyền và room còn phù hợp, rồi insert booking `PENDING_PAYMENT` với `room_id`, `email`, `check_in`, `check_out`. Exclusion constraint giữ khoảng giờ ngay trong transaction insert. Từ lúc này, user B tìm cùng khoảng giờ sẽ không thấy phòng đó.
-3. Thanh toán thành công chuyển booking `PENDING_PAYMENT → CONFIRMED`; khoảng giờ tiếp tục bị chiếm.
-4. User huỷ booking khi còn được phép: chuyển sang `CANCELLED`. Booking không còn chặn tìm kiếm; phòng lại xuất hiện cho user B ở khoảng giờ bị giải phóng. Nếu thanh toán đã thu tiền, refund là flow riêng cần tích hợp/chính sách rõ ràng.
-5. Booking không thanh toán trong thời hạn cấu hình chuyển `PENDING_PAYMENT → EXPIRED`, giải phóng phòng để không bị giữ vô hạn.
-
-Chỉ cho huỷ booking thuộc chính user, hoặc admin trong tenant theo chính sách. Huỷ phải cập nhật trạng thái có điều kiện/transaction để không giải phóng nhầm booking đã thay đổi trạng thái.
-
-## 4. Ràng buộc chống đặt chồng giờ
-
-Không làm `SELECT` availability rồi insert tách rời mà không có khóa/ràng buộc DB, vì hai request đồng thời có thể cùng thấy phòng trống. Dùng exclusion constraint PostgreSQL để chặn overlap ở tầng DB:
-
-```sql
-CREATE EXTENSION IF NOT EXISTS btree_gist;
-
-ALTER TABLE booking
-    ADD CONSTRAINT chk_booking_time
-        CHECK (check_out > check_in),
-    ADD CONSTRAINT excl_active_room_booking_overlap
-        EXCLUDE USING gist (
-            tenant_id WITH =,
-            room_id WITH =,
-            tstzrange(check_in, check_out, '[)') WITH &&
-        )
-        WHERE (status IN ('PENDING_PAYMENT', 'CONFIRMED'));
+    K->>C: GET /hotels
+    C->>DB: Đọc hotel theo tenant trong JWT
+    C-->>K: Danh sách khách sạn
+    K->>C: Chọn khách sạn và ngày, bấm Tìm kiếm
+    C->>DB: Đọc room_type và room_inventory
+    DB-->>C: Loại phòng còn trống đủ mọi đêm
+    C-->>K: Danh sách loại phòng và giá
+    K->>B: POST /bookings
+    B->>DB: BEGIN
+    B->>DB: Đọc room_type theo tenant để lấy giá
+    B->>DB: UPDATE room_inventory từng đêm, ngày tăng dần
+    B->>DB: INSERT booking PENDING_PAYMENT
+    B->>DB: COMMIT
+    B-->>K: 201, mã đơn và số tiền
+    alt Thanh toán mô phỏng thành công
+        K->>B: POST /bookings/{id}/payment
+        B->>DB: UPDATE booking thành CONFIRMED
+        B-->>K: 200 CONFIRMED
+    else Khách huỷ hoặc đơn quá hạn
+        B->>DB: BEGIN
+        B->>DB: UPDATE booking thành CANCELLED hoặc EXPIRED
+        B->>DB: UPDATE room_inventory trả phòng từng đêm
+        B->>DB: COMMIT
+    end
 ```
 
-Khoảng `[check_in, check_out)` bao gồm giờ check-in và không bao gồm giờ check-out. Hai booking cho cùng phòng được phép nối tiếp nhau khi khoảng giờ không giao nhau. Exclusion constraint làm cho một trong hai booking cạnh tranh bị từ chối; API ánh xạ xung đột này thành `409 Conflict`.
+## 3. Dữ liệu ban đầu
 
-Khi huỷ hoặc hết hạn, đổi status khỏi tập `PENDING_PAYMENT`/`CONFIRMED`; booking không còn tham gia exclusion constraint, nên cùng phòng có thể được đặt ở khoảng giờ đó. Không xoá booking lịch sử.
+Giữ nguyên số ID loại phòng so với ID phòng hiện tại (`1`–`5`) để ít phải sửa tài liệu kiểm thử. ID chỉ đúng trên DB vừa tạo sạch.
 
-## 5. FK và tenant isolation
+**`hotel`**
+
+| id | tenant_id | name | city |
+|---|---|---|---|
+| 1 | 1 | Demo Hotel A - Hà Nội | Hà Nội |
+| 2 | 2 | Demo Hotel B - TP.HCM | TP.HCM |
+| 3 | 1 | Demo Hotel A - Đà Nẵng | Đà Nẵng |
+
+Tenant 1 có hai khách sạn để bước chọn khách sạn có ý nghĩa khi demo. User chỉ thấy khách sạn trong tenant của mình.
+
+**`room_type`**
+
+| id | tenant_id | hotel_id | code | name | capacity | base_price | total_rooms | Dùng cho |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 1 | 1 | STD | Standard | 2 | 500,000 | 3 | Luồng chính |
+| 2 | 1 | 1 | DLX | Deluxe | 2 | 900,000 | 4 | Luồng chính |
+| 3 | 2 | 2 | STD | Standard | 2 | 450,000 | 5 | Kiểm thử khác tenant |
+| 4 | 2 | 2 | DLX | Deluxe | 2 | 850,000 | 6 | Kiểm thử khác tenant |
+| 5 | 1 | 3 | RACE | Race Test | 2 | 500,000 | 1 | Chỉ dùng cho race test |
+| 6 | 1 | 3 | STD | Standard | 2 | 600,000 | 5 | Luồng chính |
+
+**`room_inventory`**
+
+Mỗi loại phòng có một dòng cho mỗi đêm từ 01/11/2026 đến 31/01/2027, `total = total_rooms`, `sold = 0`. Đêm chưa có dòng nghĩa là chưa mở bán.
 
 ```sql
--- users
-CONSTRAINT uq_users_tenant_email UNIQUE (tenant_id, email)
-
--- room
-CONSTRAINT uq_room_tenant_id UNIQUE (tenant_id, id)
-
--- booking
-FOREIGN KEY (tenant_id, room_id) REFERENCES room (tenant_id, id),
-FOREIGN KEY (tenant_id, email) REFERENCES users (tenant_id, email)
+INSERT INTO room_inventory (tenant_id, room_type_id, stay_date, total)
+SELECT rt.tenant_id, rt.id, d::date, rt.total_rooms
+FROM room_type rt
+CROSS JOIN generate_series(DATE '2026-11-01', DATE '2027-01-31', INTERVAL '1 day') AS d;
 ```
 
-`tenant_id` và `email` phải lấy từ JWT đã xác minh, không lấy từ body do client gửi. `assigned_by` lưu user Admin đã thực hiện điều phối, nếu có.
+Ngày cố định giúp `docs/demo.http` và test cho cùng một kết quả. Demo chưa có job tự mở bán thêm ngày. Khi `ADMIN` tạo loại phòng mới, Catalog phải thêm dòng tồn cho khoảng mở bán trong cùng transaction, nếu không loại phòng đó sẽ không bao giờ hiện trong kết quả tìm kiếm.
 
-## 6. Quyền xem số lượng và điều phối phòng
+**Ví dụ dùng ở các mục sau.** Đã có 4 đơn `CONFIRMED`:
 
-- User thường chỉ tìm/xem các phòng còn trống khớp tiêu chí và thời gian; không được xem tổng inventory tenant hoặc danh sách điều phối. Số phòng trong kết quả tìm kiếm chỉ là kết quả khớp filter.
-- Chỉ `ADMIN` được xem tổng số phòng theo tenant và tình trạng vận hành, số phòng trống/đang giữ trong một khoảng giờ, danh sách booking cần xếp phòng và gán/đổi phòng.
-- Mọi lần gán phòng phải kiểm tra room cùng tenant, `room.operational_status='ACTIVE'`, đủ sức chứa và không có booking `PENDING_PAYMENT`/`CONFIRMED` bị overlap trong khoảng đó. Ghi Admin thực hiện vào `assigned_by`/audit log.
-- Nếu user đã chọn phòng cụ thể khi đặt, Admin chỉ được đổi sang phòng thay thế còn trống cho đúng khoảng giờ. Cập nhật room/booking và kiểm tra overlap phải nguyên tử để không tạo double booking.
+| id | Loại phòng | check_in | check_out | room_count | total_amount |
+|---|---|---|---|---|---|
+| 1 | STD | 21/11 | 23/11 | 1 | 1,000,000 |
+| 2 | STD | 24/11 | 26/11 | 1 | 1,000,000 |
+| 3 | STD | 25/11 | 27/11 | 1 | 1,000,000 |
+| 4 | DLX | 25/11 | 26/11 | 4 | 3,600,000 |
 
-## 7. API flow
+Tồn kho tương ứng:
 
-### Tìm phòng
+| Loại phòng | stay_date | total | sold | Còn trống |
+|---|---|---|---|---|
+| STD | 23/11 | 3 | 0 | 3 |
+| STD | 24/11 | 3 | 1 | 2 |
+| STD | 25/11 | 3 | 2 | 1 |
+| STD | 26/11 | 3 | 1 | 2 |
+| STD | 27/11 | 3 | 0 | 3 |
+| DLX | 24/11 | 4 | 0 | 4 |
+| DLX | 25/11 | 4 | 4 | 0 |
 
-`GET /api/rooms/search` yêu cầu `checkIn`, `checkOut`, `guestCount`; `roomType` là tùy chọn. Không trả danh sách trước khi tiêu chí hợp lệ và người dùng bấm tìm kiếm. Mỗi kết quả có `status='AVAILABLE'` theo khoảng giờ yêu cầu.
+## 4. Flow tìm kiếm
 
-### Tạo booking / thanh toán
+Danh sách phòng chưa hiện khi mở trang. Khách chọn **Khách sạn 1, nhận phòng 24/11, trả phòng 26/11**, rồi bấm Tìm kiếm:
+
+```http
+GET /api/hotels/1/availability?checkIn=2026-11-24&checkOut=2026-11-26
+```
+
+Kỳ ở này có **2 đêm: 24 và 25/11**. Flow này chỉ đọc dữ liệu, chưa giữ phòng nào.
+
+```sql
+SELECT rt.id, rt.code, rt.name, rt.capacity, rt.base_price,
+       MIN(i.total - i.sold) AS available_rooms
+FROM room_type rt
+JOIN room_inventory i
+  ON i.tenant_id = rt.tenant_id
+ AND i.room_type_id = rt.id
+WHERE rt.tenant_id = :tenantId            -- từ JWT
+  AND rt.hotel_id = :hotelId
+  AND i.stay_date >= :checkIn             -- ngày nhận phòng
+  AND i.stay_date <  :checkOut            -- ngày trả phòng, không tính đêm này
+GROUP BY rt.id
+HAVING COUNT(*) = :nights                 -- đủ dòng tồn cho mọi đêm
+   AND MIN(i.total - i.sold) > 0          -- đêm ít phòng nhất vẫn còn phòng
+ORDER BY rt.id;
+```
+
+| Loại phòng | Đêm 24 | Đêm 25 | `MIN` | Kết quả |
+|---|---|---|---|---|
+| Standard | 2 | 1 | 1 | Hiển thị, còn 1 phòng |
+| Deluxe | 4 | 0 | 0 | Không hiển thị, vì đêm 25 đã hết |
+
+Response `200`:
+
+```json
+[
+  {
+    "roomTypeId": 1,
+    "code": "STD",
+    "name": "Standard",
+    "capacity": 2,
+    "pricePerNight": 500000.00,
+    "nights": 2,
+    "totalPricePerRoom": 1000000.00,
+    "availableRooms": 1
+  }
+]
+```
+
+| Tình huống | Kết quả |
+|---|---|
+| Không loại phòng nào còn đủ mọi đêm, hoặc có đêm chưa mở bán | `200` với `[]` |
+| Khách sạn không tồn tại hoặc thuộc tenant khác | `404`, cùng một body cho cả hai trường hợp |
+| Ngày sai định dạng, `checkOut` không sau `checkIn`, `checkIn` ở quá khứ, hoặc ở quá 30 đêm | `400` |
+
+"Hôm nay" tính theo giờ Việt Nam (`Asia/Ho_Chi_Minh`). Vì cột là `DATE`, request dùng dạng `YYYY-MM-DD`, không có giờ và múi giờ. Giờ nhận và trả phòng là quy định của khách sạn, không phải dữ liệu khách nhập.
+
+## 5. Flow đặt phòng
+
+Khách bấm **Đặt** 1 phòng Standard:
+
+```json
+{ "roomTypeId": 1, "checkIn": "2026-11-24", "checkOut": "2026-11-26", "roomCount": 1 }
+```
+
+`roomCount` từ 1 đến 10. Số liệu lúc tìm kiếm có thể đã cũ, nên hệ thống kiểm tra lại ngay khi trừ phòng.
+
+### 5.1 Trong một transaction
+
+```sql
+-- Chạy cho từng đêm, theo ngày tăng dần: 24/11 rồi 25/11
+UPDATE room_inventory
+SET sold = sold + :roomCount
+WHERE tenant_id = :tenantId
+  AND room_type_id = :roomTypeId
+  AND stay_date = :stayDate
+  AND sold + :roomCount <= total;
+```
+
+| Bước | Lệnh | Kiểm tra | Kết quả |
+|---|---|---|---|
+| 1 | `BEGIN` | | Bắt đầu transaction |
+| 2 | Đọc `room_type` theo `id` và `tenant_id` | Không có dòng thì trả `404` | Tính tiền: 500,000 x 2 đêm x 1 phòng = 1,000,000 |
+| 3 | `UPDATE` đêm 24/11 | `1 + 1 <= 3`, đúng | `sold`: 1 → **2** |
+| 4 | `UPDATE` đêm 25/11 | `2 + 1 <= 3`, đúng | `sold`: 2 → **3** |
+| 5 | `INSERT` đơn 5 | | Thêm đơn `PENDING_PAYMENT` |
+| 6 | `COMMIT` | | Các thay đổi được lưu và người khác thấy được |
+
+Nếu đêm nào cập nhật được 0 dòng (hết phòng hoặc chưa mở bán), hệ thống rollback toàn bộ và trả `409`.
+
+Transaction phải dùng mức **READ COMMITTED**, là mặc định của PostgreSQL và Spring. Khi chờ khóa xong, `UPDATE` đánh giá lại `sold + :roomCount <= total` trên giá trị mới nhất. Ở mức `REPEATABLE READ`, bên chờ sẽ nhận lỗi serialization thay vì kết quả này.
+
+### 5.2 Sau khi `COMMIT`
+
+Chỉ 2 dòng in đậm thay đổi. Đêm 26/11 không đổi vì đó là ngày khách trả phòng.
+
+| stay_date | total | sold | Còn trống |
+|---|---|---|---|
+| 23/11 | 3 | 0 | 3 |
+| **24/11** | 3 | **2** | **1** |
+| **25/11** | 3 | **3** | **0** |
+| 26/11 | 3 | 1 | 2 |
+| 27/11 | 3 | 0 | 3 |
+
+Response `201`:
 
 ```json
 {
-  "roomId": 1,
-  "checkIn": "2026-11-10T14:00:00+07:00",
-  "checkOut": "2026-11-12T11:00:00+07:00"
+  "id": 5,
+  "tenantId": 1,
+  "roomTypeId": 1,
+  "userEmail": "user-tenant1@example.com",
+  "checkIn": "2026-11-24",
+  "checkOut": "2026-11-26",
+  "roomCount": 1,
+  "totalAmount": 1000000.00,
+  "status": "PENDING_PAYMENT",
+  "paymentExpiresAt": "2026-11-03T02:30:30Z",
+  "createdAt": "2026-11-03T02:15:30Z"
 }
 ```
 
-Booking lấy `tenant_id`/`email` từ JWT, ghi booking `PENDING_PAYMENT` cùng khoảng giờ. Exclusion constraint trong DB giữ khoảng giờ ngay khi insert; thanh toán thành công chuyển thành `CONFIRMED`. Trùng giờ hoặc phòng vừa được người khác giữ trả `409`.
+### 5.3 Kết quả theo tình huống
 
-### Huỷ booking
+| Tình huống | Kết quả | Dữ liệu |
+|---|---|---|
+| Đủ phòng mọi đêm | `201 PENDING_PAYMENT` | Trừ tồn và thêm 1 đơn |
+| Loại phòng không tồn tại hoặc thuộc tenant khác | `404` | Không đổi |
+| Có đêm hết phòng hoặc chưa mở bán | `409` | Rollback |
+| `user_email` không khớp `app_user` trong tenant | `403` | Rollback |
+| `checkIn` ở quá khứ, ở quá 30 đêm, hoặc `roomCount` ngoài 1–10 | `400` | Không đổi |
 
-`POST /api/bookings/{id}/cancel`: user huỷ booking của mình (hoặc Admin trong tenant theo policy); thành công chuyển thành `CANCELLED`. Lần tìm kiếm kế tiếp cho cùng khung giờ có thể trả phòng vừa được giải phóng. Request lặp lại phải trả kết quả ổn định và không giải phóng một booking khác.
+## 6. Thanh toán, huỷ và hết hạn
 
-### Admin inventory / assign
+| Booking status | Có giữ phòng không? | Ý nghĩa |
+|---|---|---|
+| `PENDING_PAYMENT` | Có | Đã trừ tồn, đang chờ thanh toán. `payment_expires_at` mặc định sau 15 phút, cấu hình được |
+| `CONFIRMED` | Có | Thanh toán mô phỏng thành công |
+| `CANCELLED` | Không | Đã huỷ và trả phòng |
+| `EXPIRED` | Không | Quá hạn thanh toán và trả phòng |
 
-`GET /api/admin/rooms/summary?checkIn=...&checkOut=...`, `GET /api/admin/rooms?checkIn=...&checkOut=...` và `PUT /api/admin/bookings/{id}/room` chỉ cho `ADMIN`. Summary trả tổng số phòng cùng số `AVAILABLE`/`BOOKED` trong khoảng đã chọn; danh sách Admin có thể xem cả trạng thái vận hành/bận. Endpoint kiểm tra/gán phòng chỉ thao tác trong tenant từ JWT; user thường nhận `403`.
+**Thanh toán thành công:** chỉ đổi `booking`, vì phòng đã được trừ lúc đặt.
 
-## 8. Thứ tự migration
+```sql
+UPDATE booking
+SET status = 'CONFIRMED'
+WHERE id = :id AND tenant_id = :tenantId AND user_email = :email
+  AND status = 'PENDING_PAYMENT'
+  AND payment_expires_at > now();
+```
+
+Cập nhật được 0 dòng thì đơn đã huỷ, đã hết hạn hoặc đã thanh toán, trả `409`.
+
+**Huỷ hoặc hết hạn:** đổi trạng thái có điều kiện trước, **chỉ khi đổi được đúng 1 dòng** mới trả phòng, trong cùng một transaction. Nhờ vậy huỷ hai lần, hoặc huỷ trùng lúc job hết hạn chạy, không trả phòng hai lần.
+
+```sql
+UPDATE booking
+SET status = 'CANCELLED'      -- job hết hạn dùng 'EXPIRED'
+WHERE id = :id AND tenant_id = :tenantId
+  AND status IN ('PENDING_PAYMENT', 'CONFIRMED');  -- job hết hạn chỉ xét PENDING_PAYMENT
+
+-- Nếu đổi được 1 dòng: chạy cho từng đêm, theo ngày tăng dần
+UPDATE room_inventory
+SET sold = sold - :roomCount
+WHERE tenant_id = :tenantId
+  AND room_type_id = :roomTypeId
+  AND stay_date = :stayDate;
+```
+
+Huỷ đơn 5 đưa `sold` đêm 24/11 về 1 và đêm 25/11 về 2. Không xoá lịch sử booking. Job hết hạn tìm đơn bằng index `idx_booking_pending_expiry` và xử lý mỗi đơn trong một transaction riêng.
+
+## 7. Các quy tắc
+
+### 7.1 Mỗi dòng là một đêm ngủ
+
+Booking chỉ trừ từ đêm nhận phòng đến đêm trước ngày trả phòng. Ví dụ với loại phòng chỉ có 1 phòng:
+
+| Khách đầu | Khách sau | Đêm trùng | Kết quả |
+|---|---|---|---|
+| 27→29 | 29→31 | Không | Cả hai đặt được |
+| 27→29 | 28→30 | Đêm 28 | Khách sau bị từ chối |
+
+### 7.2 Đặt sau khi đơn 5 đã giữ phòng
+
+| Khách mới đặt | Các đêm | Kết quả |
+|---|---|---|
+| 23→25/11 | 23, 24 | Đặt được |
+| 24→26/11 | 24, 25 | `409`, vì đêm 25 đã hết phòng |
+| 26→28/11 | 26, 27 | Đặt được |
+
+### 7.3 Hai người đặt cùng lúc
+
+A và B cùng đặt 24→26/11 khi đêm 25 chỉ còn 1 phòng, và A cập nhật trước:
+
+| Thứ tự | A | B |
+|---|---|---|
+| 1 | Đêm 24: `sold` 1 → 2 | Chờ A, vì cùng dòng |
+| 2 | Đêm 25: `sold` 2 → 3 | Vẫn chờ |
+| 3 | `COMMIT`, đặt thành công | Đêm 24: `sold` 2 → 3 (tạm thời) |
+| 4 | | Đêm 25: `3 + 1 <= 3` sai, cập nhật 0 dòng |
+| 5 | | Rollback, đêm 24 về `sold` = 2, trả `409` |
+
+Mọi request đều khóa các đêm theo ngày tăng dần, nên hai đơn có khoảng ngày giao nhau không tạo deadlock. Hai khách không trùng đêm thì cập nhật các dòng khác nhau, không phải chờ nhau.
+
+### 7.4 Cách ly tenant
+
+- Mọi truy vấn đều có `tenant_id` từ JWT. Loại phòng hoặc khách sạn của tenant khác trả `404`, giống như không tồn tại.
+- Booking đọc `room_type` theo tenant **trước** khi trừ tồn, nên không thể nhận `409` từ tồn kho của tenant khác. Nhờ đó không còn lỗi lộ lịch như khi dùng `EXCLUDE` (phải kiểm tra lại để đổi `409` thành `404`).
+- FK ghép chặn ngay ở database: `room_type`, `room_inventory` và `booking` không thể trỏ sang dữ liệu thuộc tenant khác.
+
+### 7.5 `room_inventory` và `booking` nằm chung một database
+
+Như vậy trừ phòng và tạo đơn nằm trong một `COMMIT`, cùng thành công hoặc cùng thất bại, và Booking không cần gọi HTTP sang Catalog. Nếu tách database thì cần giữ chỗ có thời hạn qua API, bước bù trừ, idempotency và job đối soát.
+
+## 8. Database đảm bảo gì, service đảm bảo gì
+
+| Quy tắc | Ai đảm bảo |
+|---|---|
+| Không bán quá số phòng trong một đêm | Database: `CHECK (sold >= 0 AND sold <= total)` |
+| Không giảm `total` xuống dưới số đã bán | Database: cùng `CHECK` trên |
+| Không trỏ sang dữ liệu tenant khác | Database: FK ghép |
+| `sold` khớp với các booking đang giữ phòng | **Service**: cập nhật hai bảng trong cùng transaction |
+
+**Đánh đổi so với `EXCLUDE`:** trước đây database tự chặn trùng giờ dù service viết gì. Giờ một đoạn code `INSERT booking` mà quên trừ tồn sẽ không bị database chặn. Vì vậy chỉ một service được ghi `sold`, và truy vấn đối soát sau đây phải trả về **0 dòng** sau mọi test và race test:
+
+```sql
+SELECT i.tenant_id, i.room_type_id, i.stay_date, i.sold,
+       COALESCE(SUM(b.room_count), 0) AS expected_sold
+FROM room_inventory i
+LEFT JOIN booking b
+  ON b.tenant_id = i.tenant_id
+ AND b.room_type_id = i.room_type_id
+ AND b.status IN ('PENDING_PAYMENT', 'CONFIRMED')
+ AND i.stay_date >= b.check_in
+ AND i.stay_date <  b.check_out
+GROUP BY i.tenant_id, i.room_type_id, i.stay_date, i.sold
+HAVING i.sold <> COALESCE(SUM(b.room_count), 0);
+```
+
+**Reset demo:** xoá booking thôi là chưa đủ, phải đưa `sold` về 0 trong cùng lệnh:
+
+```sql
+BEGIN;
+TRUNCATE booking RESTART IDENTITY;
+UPDATE room_inventory SET sold = 0;
+COMMIT;
+```
+
+## 9. Định nghĩa bảng
+
+`tenant` và `app_user` giữ nguyên theo migration của IAM.
+
+```sql
+-- catalog-service
+CREATE TABLE hotel (
+    id        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    tenant_id BIGINT       NOT NULL REFERENCES tenant (id),
+    name      VARCHAR(100) NOT NULL,
+    city      VARCHAR(100) NOT NULL,
+    CONSTRAINT uq_hotel_tenant_id UNIQUE (tenant_id, id)
+);
+
+CREATE TABLE room_type (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    tenant_id   BIGINT         NOT NULL,
+    hotel_id    BIGINT         NOT NULL,
+    code        VARCHAR(20)    NOT NULL,
+    name        VARCHAR(100)   NOT NULL,
+    capacity    INT            NOT NULL,
+    base_price  NUMERIC(10, 2) NOT NULL,
+    total_rooms INT            NOT NULL,
+    CONSTRAINT uq_room_type_tenant_id UNIQUE (tenant_id, id),
+    CONSTRAINT uq_room_type_hotel_code UNIQUE (hotel_id, code),
+    CONSTRAINT fk_room_type_hotel_same_tenant
+        FOREIGN KEY (tenant_id, hotel_id) REFERENCES hotel (tenant_id, id),
+    CONSTRAINT chk_room_type_capacity CHECK (capacity > 0),
+    CONSTRAINT chk_room_type_price CHECK (base_price > 0),
+    CONSTRAINT chk_room_type_total_rooms CHECK (total_rooms >= 0)
+);
+
+CREATE TABLE room_inventory (
+    tenant_id    BIGINT NOT NULL,
+    room_type_id BIGINT NOT NULL,
+    stay_date    DATE   NOT NULL,
+    total        INT    NOT NULL,
+    sold         INT    NOT NULL DEFAULT 0,
+    PRIMARY KEY (tenant_id, room_type_id, stay_date),
+    CONSTRAINT fk_inventory_room_type_same_tenant
+        FOREIGN KEY (tenant_id, room_type_id) REFERENCES room_type (tenant_id, id),
+    CONSTRAINT chk_inventory_not_oversold CHECK (sold >= 0 AND sold <= total)
+);
+
+-- booking-service
+CREATE TABLE booking (
+    id                 BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    tenant_id          BIGINT         NOT NULL REFERENCES tenant (id),
+    room_type_id       BIGINT         NOT NULL,
+    user_email         VARCHAR(255)   NOT NULL,
+    check_in           DATE           NOT NULL,
+    check_out          DATE           NOT NULL,
+    room_count         INT            NOT NULL,
+    total_amount       NUMERIC(14, 2) NOT NULL,
+    status             VARCHAR(20)    NOT NULL DEFAULT 'PENDING_PAYMENT',
+    payment_expires_at TIMESTAMPTZ    NOT NULL,
+    created_at         TIMESTAMPTZ    NOT NULL DEFAULT now(),
+    CONSTRAINT chk_booking_status
+        CHECK (status IN ('PENDING_PAYMENT', 'CONFIRMED', 'CANCELLED', 'EXPIRED')),
+    CONSTRAINT chk_booking_email_lowercase CHECK (user_email = lower(user_email)),
+    CONSTRAINT chk_booking_checkout_after_checkin CHECK (check_out > check_in),
+    CONSTRAINT chk_booking_room_count CHECK (room_count > 0),
+    CONSTRAINT chk_booking_total_amount CHECK (total_amount > 0),
+    CONSTRAINT fk_booking_room_type_same_tenant
+        FOREIGN KEY (tenant_id, room_type_id) REFERENCES room_type (tenant_id, id),
+    CONSTRAINT fk_booking_user_same_tenant
+        FOREIGN KEY (tenant_id, user_email) REFERENCES app_user (tenant_id, email)
+);
+
+CREATE INDEX idx_booking_tenant_user ON booking (tenant_id, user_email);
+CREATE INDEX idx_booking_room_type ON booking (tenant_id, room_type_id);
+CREATE INDEX idx_booking_pending_expiry ON booking (payment_expires_at)
+    WHERE status = 'PENDING_PAYMENT';
+```
+
+- `total_amount` dùng `NUMERIC(14,2)` vì là giá nhân số đêm và số phòng, có thể vượt giới hạn `NUMERIC(10,2)` của `base_price`.
+- `total_amount` được chốt lúc đặt, nên đổi giá sau đó không ảnh hưởng đơn cũ.
+- `room_inventory.total` tách khỏi `room_type.total_rooms` để từng đêm có thể bán ít hơn, ví dụ khi bảo trì. `total_rooms` chỉ là giá trị mặc định khi tạo dòng tồn.
+- Không còn `btree_gist` và `EXCLUDE`, vì tồn kho theo đêm đã thay vai trò chống bán trùng.
+
+## 10. API theo thiết kế này
+
+| Frontend gọi | Service | Role | Mục đích |
+|---|---|---|---|
+| `GET /api/hotels` | Catalog | `USER`, `ADMIN` | Danh sách khách sạn trong tenant |
+| `GET /api/hotels/{hotelId}/availability?checkIn&checkOut` | Catalog | `USER`, `ADMIN` | Loại phòng còn trống (§4) |
+| `POST /api/hotels/{hotelId}/room-types` | Catalog | `ADMIN` | Thêm loại phòng và tạo dòng tồn |
+| `PUT /api/room-types/{id}/price` | Catalog | `ADMIN` | Sửa giá, chỉ ảnh hưởng đơn mới |
+| `GET /api/admin/hotels/{hotelId}/inventory?checkIn&checkOut` | Catalog | `ADMIN` | Xem `total`, `sold`, còn trống theo từng đêm |
+| `POST /api/bookings` | Booking | `USER` | Đặt phòng (§5) |
+| `POST /api/bookings/{id}/payment` | Booking | `USER` là chủ đơn | Thanh toán mô phỏng (§6) |
+| `POST /api/bookings/{id}/cancel` | Booking | `USER` là chủ đơn, `ADMIN` cùng tenant | Huỷ đơn (§6) |
+| `GET /api/bookings`, `GET /api/bookings/{id}` | Booking | `USER`, `ADMIN` | Xem đơn, quyền như hiện tại |
+
+`USER` chỉ thấy `availableRooms` trong kết quả tìm kiếm, không thấy `total` và `sold`.
+
+**Giới hạn cần nói rõ khi demo:** gửi lại cùng một request đặt phòng sẽ **tạo thêm đơn thứ hai** nếu còn phòng, vì không còn `EXCLUDE` và demo không có idempotency key. Frontend cần khóa nút Đặt sau lần bấm đầu. Đơn thừa chưa thanh toán sẽ tự hết hạn và trả phòng.
+
+## 11. Thứ tự migration
 
 ```mermaid
 flowchart LR
-    A["A: iam-service<br/>tenant, users"] --> B["B: catalog-service<br/>room"]
-    B --> C["C: booking-service<br/>booking + time constraints"]
+    A["IAM<br/>tenant, app_user"] --> B["Catalog<br/>hotel, room_type, room_inventory"]
+    B --> C["Booking<br/>booking"]
 ```
 
-Chạy lần đầu trên DB sạch theo A → B → C vì FK tham chiếu bảng service trước. Mỗi service dùng bảng Flyway history riêng (`flyway_schema_history_iam`, `_catalog`, `_booking`).
+Chạy lần đầu trên DB sạch theo IAM → Catalog → Booking vì có FK tham chiếu bảng của service trước. Mỗi service dùng bảng lịch sử Flyway riêng như hiện tại.
+
+**Cách chuyển đổi đề xuất:** sửa trực tiếp các migration chưa phát hành (`V1__create_room.sql`, `V2__seed_rooms.sql` của Catalog, `V1__create_booking.sql` của Booking), rồi cả nhóm chạy lại DB local bằng `docker compose down -v`. Dữ liệu chỉ là seed nên không mất gì.
+
+Không nên thêm migration mới để xoá `room`. Trên DB sạch, Catalog chạy trước Booking, nên nếu Catalog xoá `room` thì `V1` của Booking sẽ lỗi vì thiếu bảng để tạo FK. Còn trên DB đã có dữ liệu, Catalog không xoá được `room` khi `booking` còn FK trỏ tới.
+
+## 12. Khác biệt so với code hiện tại
+
+| Nội dung | Thiết kế này | Code và migration trên `main` |
+|---|---|---|
+| Đơn vị bán | `room_type`, có `room_count` | `room` là một phòng cụ thể |
+| Khách sạn | Bảng `hotel`, một tenant có nhiều khách sạn | Không có, tenant được coi như khách sạn |
+| Thời gian | `DATE`, tính theo đêm | `TIMESTAMPTZ`, có giờ thật |
+| Tìm phòng trống | Đọc `room_inventory` theo từng đêm | Catalog chưa có API, `GET /rooms` cũng chưa có code |
+| Chống bán trùng | `UPDATE` có điều kiện theo từng đêm | `EXCLUDE` trên `booking` |
+| Booking service | Cần `@Transactional`, trừ tồn rồi mới `INSERT` | Chỉ `INSERT` rồi đổi lỗi database thành lỗi nghiệp vụ |
+| Trạng thái đơn | 4 trạng thái, có thanh toán mô phỏng, huỷ, hết hạn | Chỉ `CONFIRMED` |
+| Giá trên đơn | `total_amount` | Không lưu giá |
+| Tên bảng user | `app_user`, `user_email` theo migration | Giống thiết kế này. Bản `erd-v2.md` trước và plan ghi `users`, `email` là chưa khớp migration |
