@@ -6,3 +6,6 @@ build
 
 # Ignore Kotlin plugin data
 .kotlin
+
+# Local seed data with real test emails — never commit
+docker/seed/*.local.sql

@@ -31,7 +31,7 @@
 
 - **2 tenant** cùng dùng 1 hệ thống: dữ liệu phòng/booking của tenant này không bị tenant khác đọc hoặc sửa.
 - Role `USER` (xem và đặt phòng tenant mình) và `ADMIN` (xem, thêm phòng, sửa giá, xem toàn bộ booking tenant mình).
-- Google login qua `iam-service`; tài khoản phải được **provision trước** trong `iam_db`, không có tự đăng ký/gán tenant mặc định.
+- Google login qua `iam-service`; tài khoản phải được **provision trước** trong bảng `app_user`, không có tự đăng ký/gán tenant mặc định.
 - IAM ký JWT nội bộ RS256 có `sub`, `email`, `tenant_id`, `role` (kèm `iss`, `iat`, `exp` và thông tin kiểm tra chữ ký); services verify bằng JWKS.
 - Danh sách phòng, thêm phòng và sửa giá theo tenant; giá là số dương.
 - `USER` đặt 1 phòng còn trống, Catalog đánh dấu hết chỗ **nguyên tử**; 2 request cạnh tranh một phòng chỉ 1 request thành công.
@@ -58,19 +58,22 @@
 HTML App 1 :3000 ─┐
                   ├─ login ─> iam-service :8084 ── OAuth2 Code + PKCE S256 ──> Google
 HTML App 2 :3001 ─┘                    │
-          │                            └─ JWT RS256 / JWKS / iam_db
+          │                            └─ JWT RS256 / JWKS
           └── Bearer JWT ──> api-gateway :8080
-                                 ├── /api/rooms/** ──> catalog-service :8081 ──> catalog_db
-                                 └── /api/bookings/** ──> booking-service :8082 ──> booking_db
-                                                          └─ /internal/rooms/{id}/hold ──> catalog-service
+                                 ├── /api/rooms/** ──> catalog-service :8081 ──┐
+                                 └── /api/bookings/** ──> booking-service :8082 ─┤── 1 database Postgres chung "hotelbooking"
+                                       └─ /internal/rooms/{id}/hold ──> catalog-service
 
 api-gateway, catalog-service, booking-service xác minh JWT từ JWKS của iam-service.
+iam-service, catalog-service, booking-service dùng CHUNG 1 database "hotelbooking" (1 schema `public`),
+có FK thật giữa bảng tenant/app_user (iam) ↔ room (catalog) ↔ booking (booking). Mỗi service vẫn chỉ tự
+quản lý migration cho bảng của mình (ranh giới ownership giữ nguyên), chỉ khác là không tách DB vật lý.
 ```
 
 | Thành phần | Owner | Mục đích | Chú ý |
 |---|---|---|---|
 | Root Gradle + Compose | A | Build/khởi động dự án | Monorepo, Java 21; kiểm tra repo hiện tại trước khi sửa |
-| `iam-service` + `iam_db` | A | Google login, PKCE, allowlist user, JWT, JWKS | Không dùng Keycloak |
+| `iam-service` | A | Google login, PKCE, allowlist user, JWT, JWKS | Không dùng Keycloak |
 | `common-security` | A | Verify JWT, role, `TenantContext` | Module thư viện, không chạy như service |
 | `api-gateway` :8080 | A | Forward API có Bearer token | Không route `/internal/**` |
 | `catalog-service` :8081 | B | CRUD phòng và hold nguyên tử | DB riêng, dữ liệu theo tenant |
@@ -82,7 +85,11 @@ api-gateway, catalog-service, booking-service xác minh JWT từ JWKS của iam-
 
 **Version gate trước khi code:** A xác minh phiên bản Spring Boot / Spring Security / Spring Cloud (nếu có dùng) / Gradle wrapper tương thích. **Không tự nâng cấp toàn repo chỉ vì thấy có phiên bản mới hơn**; ghi phiên bản khóa trong `docs/decisions.md`, chạy `./gradlew build` được rồi mới yêu cầu các service cùng tuân thủ.
 
-**Cơ sở dữ liệu:** một PostgreSQL server local, **3 database độc lập**: `iam_db`, `catalog_db`, `booking_db`. Không còn `notification_db`.
+**Cơ sở dữ liệu (đã đổi so với bản đầu v2):** một PostgreSQL server local, **1 database chung** `hotelbooking`, 1 schema `public`. Không tách `iam_db`/`catalog_db`/`booking_db`/`notification_db` riêng — lý do: hệ thống nhỏ, 1 nhóm, không cần scale/deploy schema độc lập giữa service, và "database-per-service" không phải chủ đề mentor chấm (xem §10) nên không cần trả giá độ phức tạp đó. Đổi lại, có **FK thật** giữa các bảng (`room.tenant_id → tenant.id`, `booking.tenant_id → tenant.id`, `booking.room_id → room.id`, `booking.user_email → app_user.email`), DB tự chặn dữ liệu rác thay vì phải tự verify bằng code như bản tách DB.
+
+Mỗi service **vẫn chỉ sở hữu và chạy migration cho bảng của mình** (A: `tenant`, `app_user`; B: `room`; C: `booking`) — ranh giới ownership giữa A/B/C/D giữ nguyên như §6, chỉ khác là 3 bộ migration cùng ghi vào 1 database. Để 3 bộ Flyway độc lập không đụng version với nhau, mỗi service dùng riêng `spring.flyway.table` (`flyway_schema_history_iam`, `flyway_schema_history_catalog`, `flyway_schema_history_booking`) — nếu không, Flyway sẽ coi version `1`/`2` của service này đã "chạy" khi thấy version đó trong lịch sử của service khác.
+
+**Phụ thuộc thứ tự migration (do có FK thật):** `iam-service` phải migrate trước (tạo `tenant`, `app_user`) rồi mới tới `catalog-service` (FK `room.tenant_id → tenant.id`), rồi `booking-service` (FK tới cả `tenant`, `room`, `app_user`). Nếu chạy `catalog-service`/`booking-service` trước khi `iam-service` từng chạy ít nhất 1 lần trên DB sạch, migration sẽ **fail rõ ràng** vì thiếu bảng tham chiếu (lỗi tốt hơn — báo ngay lúc migrate, không phải để sai âm thầm như bản tách DB).
 
 ---
 
@@ -127,14 +134,18 @@ api-gateway, catalog-service, booking-service xác minh JWT từ JWKS của iam-
 
 ### 4.1 Database schema
 
-| DB | Bảng | Các trường bắt buộc |
-|---|---|---|
-| `iam_db` | `tenant` | `id`, `name` |
-| `iam_db` | `app_user` | `id`, `email` unique, `tenant_id`, `role (USER/ADMIN)`, `google_sub` (nếu gắn danh tính) |
-| `catalog_db` | `room` | `id`, `tenant_id`, `name`, `price`, `available BOOLEAN DEFAULT true` |
-| `booking_db` | `booking` | `id`, `tenant_id`, `room_id`, `user_email`, `status=CONFIRMED`, `created_at` |
+1 database chung `hotelbooking`, 1 schema `public`. Cột "Owner" chỉ nói ai giữ quyền sửa migration của bảng đó (ranh giới ownership §6), không phải database riêng.
 
-- Flyway V1 tạo schema, constraints/index cơ bản; có seed data có thể tái hiện. Mỗi database có `flyway_schema_history`.
+| Bảng | Owner | Các trường bắt buộc | FK thật |
+|---|---|---|---|
+| `tenant` | A | `id`, `name` | — |
+| `app_user` | A | `id`, `email` unique, `tenant_id`, `role (USER/ADMIN)`, `google_sub` (nếu gắn danh tính) | `tenant_id → tenant.id` |
+| `room` | B | `id`, `tenant_id`, `name`, `price`, `available BOOLEAN DEFAULT true` | `tenant_id → tenant.id` |
+| `booking` | C | `id`, `tenant_id`, `room_id`, `user_email`, `status=CONFIRMED`, `created_at` | `tenant_id → tenant.id`, `room_id → room.id`, `user_email → app_user.email` |
+
+- Flyway tạo schema, constraints/index, FK thật như trên; có seed data có thể tái hiện.
+- Mỗi service dùng riêng `spring.flyway.table` (`flyway_schema_history_iam`/`_catalog`/`_booking`) vì 3 bộ migration độc lập cùng ghi vào 1 database — tránh đụng số version giữa các service.
+- **Thứ tự migrate bắt buộc vì có FK thật:** A (`tenant`, `app_user`) → B (`room`) → C (`booking`). Chạy B/C trước A trên DB sạch sẽ fail ngay do thiếu bảng tham chiếu — đây là hành vi đúng, không phải bug.
 - Giá phải lớn hơn 0, `room_id`/`tenant_id` không null. Nên dùng giá dạng decimal thay cho float.
 - Không sửa migration đã chạy/merge; thay đổi thêm migration version mới.
 
@@ -166,7 +177,7 @@ WHERE id = :roomId AND tenant_id = :tenantId AND available = true;
 - Chỉ thành công khi số row cập nhật **= 1**; chạy với transaction DB phù hợp. Nếu số row = 0, kiểm tra xem room có thuộc tenant hiện tại hay không để trả **404 nếu không thấy**, **409 nếu đúng phòng nhưng đã unavailable**; không bao giờ trả dữ liệu tenant khác.
 - Booking forward JWT của người gọi, Catalog tự verify lại JWT và lấy tenant từ JWT.
 - Endpoint `/internal/**` **không expose qua gateway**; ưu tiên chỉ mở giữa services trong mạng local/Compose. Việc chặn Gateway **chưa đủ bảo mật** nếu cổng service vẫn được truy cập trực tiếp. Ghi rõ giới hạn demo-local.
-- **Giới hạn biết trước:** vì đã bỏ `release`/compensation và giao dịch phân tán, nếu hold thành công nhưng insert `booking_db` thất bại, phòng có thể bị kẹt unavailable. **Không được tuyên bố xử lý distributed transaction an toàn**. Có quy trình reset seed/DB test để demo ổn định; chỉ cân nhắc bổ sung compensation sau khi luồng MVP PASS và cả nhóm duyệt phạm vi.
+- **Giới hạn biết trước:** dù giờ `room` và `booking` nằm trong 1 database, `catalog-service` và `booking-service` vẫn là 2 process riêng gọi nhau qua HTTP — hold (ở Catalog) và insert booking (ở Booking) **vẫn là 2 transaction riêng biệt**, không gộp thành 1 transaction ACID được (muốn vậy phải gọi trực tiếp trong cùng JVM, bỏ kiến trúc nhiều service). Vì đã bỏ `release`/compensation, nếu hold thành công nhưng insert `booking` thất bại, phòng có thể bị kẹt `unavailable`. **Không được tuyên bố xử lý distributed transaction an toàn**. Có quy trình reset seed/DB test để demo ổn định; chỉ cân nhắc bổ sung compensation sau khi luồng MVP PASS và cả nhóm duyệt phạm vi.
 
 ---
 
@@ -189,7 +200,7 @@ Lệnh bằng chứng tối thiểu: `./gradlew clean build` (Windows `gradlew.b
 
 ### A — IAM / Platform / Security (phần chủ trì kỹ thuật)
 
-- Sở hữu `iam-service`, `iam_db`, `common-security`, `api-gateway`, cấu hình root Gradle và Compose.
+- Sở hữu `iam-service` (bảng `tenant`, `app_user`), `common-security`, `api-gateway`, cấu hình root Gradle và Compose (bao gồm database chung `hotelbooking`).
 - Cấu hình Google Cloud OAuth Client, redirect URI IAM, PKCE S256, Google account allowlist, JWT RS256 và JWKS.
 - Cung cấp cho B/C/D: issuer/JWKS, JWT claims/roles/tenant IDs, API login/callback, các port và ví dụ lỗi auth.
 - Test IAM/JWT/401/403, diagram IAM login + PKCE + SSO.
@@ -197,14 +208,14 @@ Lệnh bằng chứng tối thiểu: `./gradlew clean build` (Windows `gradlew.b
 
 ### B — Catalog / Flyway / Multi-tenancy
 
-- Sở hữu `catalog-service`, migration/seed `catalog_db`, API rooms, atomic `hold`.
+- Sở hữu `catalog-service`, migration/seed bảng `room` (trong database chung), API rooms, atomic `hold`.
 - Đảm bảo mọi query và update giới hạn tenant; trả 403/404/409 đúng contract.
 - Cung cấp cho C API `/internal/rooms/{id}/hold`, cho D room ID và seed/reset demo.
 - Unit tests, test tranh phòng thực với C, diagram tenant + hold.
 
 ### C — Booking / REST / Unit Test
 
-- Sở hữu `booking-service`, migration `booking_db`, POST/GET booking, gọi B bằng JWT.
+- Sở hữu `booking-service`, migration bảng `booking` (trong database chung), POST/GET booking, gọi B bằng JWT.
 - Booking lập tức `CONFIRMED`; không viết payment/cancel/idempotency.
 - Cung cấp cho D request/response/error booking, quyền USER/ADMIN, script test cạnh tranh.
 - Unit tests/validation và diagram booking với nhánh 404/409.
@@ -234,7 +245,7 @@ Lệnh bằng chứng tối thiểu: `./gradlew clean build` (Windows `gradlew.b
 |---|---|---|---|---|---|
 | **09:00–10:00 — G0** | Kiểm tra repo/versions/Google OAuth | Chốt room/tenant schema | Chốt create booking/hold contract | Ghi decisions, kịch bản demo và ports App 1/2 | Mọi người chấp thuận scope + 8/9, owner, seed, tài khoản Google test và Git rule |
 | **10:00–12:00 — G1/G2** | Gradle skeleton, Compose, IAM claim/API auth | API rooms/hold JSON | API booking JSON | Soạn `docs/demo-script.md`, `docs/demo.http` placeholder, HTML skeleton | `./gradlew build` trên skeleton; **contract đã chốt** và mỗi bên nhận API ký nhận |
-| **13:00–15:00** | `iam_db` Flyway, Google client, provision, JWT/JWKS | `catalog_db` Flyway, seed rooms | `booking_db` Flyway, stub Catalog | HTML callback nhận token memory, giao diện rooms tối giản | 3 DB migration được; IAM có test/mocks; HTML không hard-code token |
+| **13:00–15:00** | Migrate database chung (bảng `tenant`/`app_user`), Google client, provision, JWT/JWKS | Migrate bảng `room` (sau khi A đã chạy), seed rooms | Migrate bảng `booking` (sau khi A/B đã chạy), stub Catalog | HTML callback nhận token memory, giao diện rooms tối giản | 3 bộ migration (1 database) chạy đúng thứ tự A→B→C; IAM có test/mocks; HTML không hard-code token |
 | **15:00–17:00** | Google login thật, PKCE config, common-security | GET/POST/PUT rooms, tenant filter | POST booking với mock hold | Kết nối UI vào sample/mock contract, xây checklist test | Dùng được từng phần độc lập, chưa lấy stub làm bằng chứng security |
 | **17:00–18:00 — G3** | JWT hợp lệ và auth tests | API B + ID seed cho C/D | POST booking mock, unit tests đầu tiên | Script login/rooms demo bản nháp, tổng hợp issues | Build xanh; **có đường lấy JWT Google** hoặc báo rõ Google Cloud blocker; từng service khởi động được |
 
@@ -283,7 +294,7 @@ Lệnh bằng chứng tối thiểu: `./gradlew clean build` (Windows `gradlew.b
 
 | # | Trình diễn | Bằng chứng **phải nhìn thấy** | Chủ trì |
 |---|---|---|---|
-| 1 | Start repo/3 DB, Gradle build | Gateway + IAM + B/C chạy, mỗi DB có `flyway_schema_history` | A/B/D |
+| 1 | Start repo/database chung, Gradle build | Gateway + IAM + B/C chạy, mỗi service có `flyway_schema_history_*` riêng dù chung 1 database | A/B/D |
 | 2 | App 1 login Google | Email provision đúng role/tenant, JWT được issuer nội bộ ký | A/D |
 | 3 | PKCE S256 | Authorization request Google có `code_challenge` và `S256`; code flow kết thúc login thành công | A/D |
 | 4 | App 2 ở origin khác | Cùng browser profile, không nhập lại mật khẩu; dùng JWT mới/hợp lệ để gọi API | A/D |
@@ -325,7 +336,7 @@ Cấu trúc trên là **gợi ý**, phải kiểm tra thư mục thật trong re
 | Chủ đề gốc mentor | Có trong plan v2? | Ai trình bày / minh chứng | Khi nào tính đạt |
 |---|---|---|---|
 | 1. Java 21 / Spring Boot / Gradle | **Có** | A; build multi-project + DI/Bean | Các service compile/chạy và người làm giải thích được |
-| 2. Flyway | **Có** | B dẫn, A/C chứng minh migration DB mình | 3 DB có migration history, reset/recreate được |
+| 2. Flyway | **Có** | B dẫn, A/C chứng minh migration của mình | 3 bộ migration (1 database chung) có history riêng, reset/recreate được, FK thật giữa bảng |
 | 3. RESTful API | **Có** | C/B; method, 200/201/400/401/403/404/409 | API thực chạy đúng contract |
 | 4. Unit Test | **Có (bổ sung bắt buộc)** | A/B/C; D tổng hợp report | Test assertions chạy, không skip vô lý |
 | 5. IAM / SSO / PKCE | **Có (phải chứng minh)** | A + D; Google login, app1/app2 SSO, PKCE S256 | Cả 3 đều có evidence; không nhầm với V-ID thật |
@@ -395,7 +406,7 @@ sequenceDiagram
     participant Browser as Browser / App 1
     participant IAM as iam-service
     participant Google
-    participant DB as iam_db
+    participant DB as hotelbooking (tenant/app_user)
     participant App2 as HTML App 2
 
     Browser->>IAM: GET /auth/start?app=app1
@@ -426,7 +437,7 @@ sequenceDiagram
     participant UI as HTML App
     participant Gateway as api-gateway
     participant Catalog as catalog-service
-    participant DB as catalog_db
+    participant DB as hotelbooking (room)
 
     UI->>Gateway: GET /api/rooms (Bearer JWT)
     Gateway->>Gateway: Verify JWT
@@ -459,8 +470,8 @@ sequenceDiagram
     participant Gateway as api-gateway
     participant Booking as booking-service
     participant Catalog as catalog-service
-    participant RoomDB as catalog_db
-    participant BookingDB as booking_db
+    participant RoomDB as hotelbooking (room)
+    participant BookingDB as hotelbooking (booking)
 
     U1->>Gateway: POST /api/bookings {roomId}
     U2->>Gateway: POST /api/bookings {roomId}
