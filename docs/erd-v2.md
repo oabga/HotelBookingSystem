@@ -1,16 +1,16 @@
 # ERD & Database Design — theo `iam-google-sso-demo-plan-v2.md` (bản 1 database chung)
 
-> 1 database Postgres chung `hotelbooking`, 1 schema `public`. Không tách `iam_db`/`catalog_db`/`booking_db` — mỗi service (A/B/C) vẫn chỉ sở hữu migration cho bảng của mình, nhưng vì cùng nằm trong 1 database nên có **FK thật**, Postgres tự chặn dữ liệu rác (không tồn tại tenant/room/user thì không insert được), không cần tự verify tay như bản tách DB.
+> 1 database Postgres chung `hotelbooking`, 1 schema `public`. Không tách `iam_db`/`catalog_db`/`booking_db` — mỗi service (A/B/C) vẫn chỉ sở hữu migration cho bảng của mình, nhưng vì cùng nằm trong 1 database nên có **FK thật**, Postgres tự chặn dữ liệu rác, không cần tự verify tay như bản tách DB.
 
-## 1. ERD — 1 database, toàn bộ FK đều thật
+## 1. ERD — 1 database, FK ghép (composite FK) để chặn cả sai-tenant
 
 ```mermaid
 erDiagram
     TENANT ||--o{ APP_USER : "có"
     TENANT ||--o{ ROOM : "sở hữu"
     TENANT ||--o{ BOOKING : "sở hữu"
-    ROOM ||--o{ BOOKING : "được đặt trong"
-    APP_USER ||--o{ BOOKING : "đặt bởi email"
+    ROOM ||--o{ BOOKING : "được đặt trong (FK ghép tenant_id+room_id)"
+    APP_USER ||--o{ BOOKING : "đặt bởi (FK ghép tenant_id+email)"
 
     TENANT {
         BIGINT id PK
@@ -18,7 +18,7 @@ erDiagram
     }
     APP_USER {
         BIGINT id PK
-        VARCHAR email "UNIQUE, NOT NULL"
+        VARCHAR email "UNIQUE, NOT NULL, phải lowercase (CHECK)"
         BIGINT tenant_id FK
         VARCHAR role "CHECK IN (USER, ADMIN)"
         VARCHAR google_sub "nullable, UNIQUE"
@@ -33,38 +33,62 @@ erDiagram
     BOOKING {
         BIGINT id PK
         BIGINT tenant_id FK
-        BIGINT room_id FK
-        VARCHAR user_email FK
+        BIGINT room_id "FK ghép (tenant_id, room_id)"
+        VARCHAR user_email "FK ghép (tenant_id, user_email), phải lowercase"
         VARCHAR status "CHECK status = CONFIRMED (v2 bỏ cancel)"
         TIMESTAMPTZ created_at
     }
 ```
 
-Tất cả 5 đường quan hệ đều là **FK thật** (`REFERENCES`), vì mọi bảng nằm trong cùng 1 database `hotelbooking`:
-- `app_user.tenant_id → tenant.id`
-- `room.tenant_id → tenant.id`
-- `booking.tenant_id → tenant.id`
-- `booking.room_id → room.id`
-- `booking.user_email → app_user.email`
-
 **Ai sở hữu bảng nào (ownership giữ nguyên dù chung DB):** `TENANT`, `APP_USER` → A (`iam-service`). `ROOM` → B (`catalog-service`). `BOOKING` → C (`booking-service`).
 
-## 2. Thứ tự migrate bắt buộc (vì có FK thật)
+## 2. FK đơn cột KHÔNG đủ cho multi-tenant — đây là lỗi đã tìm và sửa
 
-Flyway của từng service vẫn chạy độc lập (migration riêng, `flyway.table` riêng — `flyway_schema_history_iam/_catalog/_booking`), nhưng vì `room` và `booking` có FK trỏ sang bảng do service khác tạo, **thứ tự chạy lần đầu trên DB sạch phải đúng:**
+Thiết kế ban đầu dùng FK đơn cột: `booking.room_id → room.id`, `booking.user_email → app_user.email`. Lỗi: FK đơn cột chỉ đảm bảo **"giá trị này tồn tại ở đâu đó"**, không đảm bảo **nó thuộc đúng `tenant_id` của booking**. Ví dụ DB (bản cũ) vẫn cho insert `booking(tenant_id=1, room_id=<phòng thật nhưng của tenant 2>)` — vì phòng đó *có tồn tại*, FK đơn cột không biết/không quan tâm tenant.
+
+**Fix: đổi sang FK ghép (composite FK)**, bắt cả `tenant_id` phải khớp:
+
+```sql
+-- room (catalog-service) — thêm composite unique làm "đích" cho FK ghép
+CONSTRAINT uq_room_tenant_id UNIQUE (tenant_id, id)
+
+-- app_user (iam-service) — thêm composite unique làm "đích" cho FK ghép
+CONSTRAINT uq_app_user_tenant_email UNIQUE (tenant_id, email)
+
+-- booking (booking-service) — FK ghép thay cho FK đơn cột
+CONSTRAINT fk_booking_room_same_tenant
+    FOREIGN KEY (tenant_id, room_id) REFERENCES room (tenant_id, id)
+CONSTRAINT fk_booking_user_same_tenant
+    FOREIGN KEY (tenant_id, user_email) REFERENCES app_user (tenant_id, email)
+```
+
+**Đã test bằng Postgres thật (không chỉ suy luận):**
+
+| Test | Insert | Kết quả |
+|---|---|---|
+| Sai tenant ở room | `booking(tenant_id=1, room_id=<room của tenant 2>)` | ❌ bị chặn — `violates foreign key constraint fk_booking_room_same_tenant` |
+| Sai tenant ở user | `booking(tenant_id=1, room_id=<room tenant 1>, user_email=<user tenant 2>)` | ❌ bị chặn — `violates foreign key constraint fk_booking_user_same_tenant` |
+| Đúng tenant cả 2 phía | `booking(tenant_id=1, room_id=<room tenant 1>, user_email=<user tenant 1>)` | ✅ `INSERT 0 1` |
+| Email viết hoa | `app_user(email='Admin-Tenant1@Example.com', ...)` | ❌ bị chặn — `violates check constraint chk_app_user_email_lowercase` |
+
+## 3. Vì sao vẫn cần verify `tenant_id` từ JWT ở code, dù đã có FK ghép
+
+FK ghép chặn được **dữ liệu rác trong DB**, nhưng không thay được việc kiểm tra **quyền của người gọi request**. Ví dụ: FK đảm bảo không ai tạo được `booking` trỏ sai tenant, nhưng nếu `catalog-service` không tự đọc `tenant_id` từ JWT mà tin tham số client gửi lên, 1 request có thể tự khai `tenant_id` giả để pass qua FK (vì request đó có thể tạo đúng 1 cặp `(tenant_id, room_id)` hợp lệ — chỉ là tenant đó không phải tenant thật của người gọi). Vì vậy `tenant_id` dùng trong mọi INSERT/UPDATE **phải luôn lấy từ claim trong JWT đã verify**, không bao giờ nhận trực tiếp từ body/param client gửi — FK ghép là lớp bảo vệ thứ 2 (chặn bug code), không thay cho lớp bảo vệ thứ 1 (đọc đúng tenant từ JWT).
+
+## 4. Chuẩn hoá email — lý do thêm `CHECK (email = lower(email))`
+
+`iam-google-sso-demo-plan-v2.md` §3.1 yêu cầu "tra `app_user` **theo email đã chuẩn hóa**". Nếu không ép tại DB, 1 user có thể vô tình được seed `User@Gmail.com` còn JWT trả về `user@gmail.com` (Google luôn trả lowercase ở claim `email`) → tra không khớp → bị 403 nhầm, rất khó debug vì nhìn bằng mắt 2 chuỗi "giống nhau". Thêm `CHECK (email = lower(email))` ở cả `app_user.email` và `booking.user_email` để lỗi này **bị chặn ngay lúc insert/seed**, không phải lúc runtime khi user login.
+
+## 5. Thứ tự migrate bắt buộc (không đổi so với bản trước)
 
 ```mermaid
 flowchart LR
     A["A: iam-service<br/>tạo tenant, app_user"] --> B["B: catalog-service<br/>tạo room (FK -> tenant)"]
-    B --> C["C: booking-service<br/>tạo booking (FK -> tenant, room, app_user)"]
+    B --> C["C: booking-service<br/>tạo booking (FK ghép -> tenant+room, tenant+app_user)"]
 ```
 
-Nếu chạy `catalog-service` hoặc `booking-service` trước khi `iam-service` từng migrate ít nhất 1 lần trên DB đó, Flyway sẽ **fail ngay với lỗi rõ ràng** (thiếu bảng tham chiếu) — đây là hành vi đúng và hữu ích (báo lỗi sớm lúc migrate), khác với bản tách DB trước đây (sai tenant chỉ phát hiện lúc runtime, qua test, không phải lúc migrate).
+Mỗi service dùng riêng `spring.flyway.table` (`flyway_schema_history_iam/_catalog/_booking`) để 3 bộ migration độc lập không đụng version nhau dù chung 1 database. Chạy sai thứ tự (B/C trước A) → Flyway fail ngay lúc migrate với lỗi rõ ràng (thiếu bảng tham chiếu) — đã test thật, đúng như mô tả.
 
-## 3. Vì sao vẫn cần verify `tenant_id` từ JWT ở từng service, dù đã có FK
+## 6. Vì sao chọn `BIGINT GENERATED ALWAYS AS IDENTITY` thay UUID
 
-FK chỉ đảm bảo **"giá trị này có tồn tại"** (ví dụ `room_id` phải là 1 room thật), **không đảm bảo "người gọi có quyền trên giá trị đó"**. Ví dụ: user tenant A có thể biết được `room_id` của tenant B (ID là số tuần tự, dễ đoán) — FK không ngăn được việc insert `booking(tenant_id=A, room_id=<room của B>)` nếu code không tự kiểm tra `room.tenant_id` khớp JWT trước khi cho hold/booking. Vì vậy `catalog-service` vẫn phải tự verify lại `tenant_id` lấy từ JWT khi xử lý `/internal/rooms/{id}/hold`, **không chỉ dựa vào FK**.
-
-## 4. Vì sao chọn `BIGINT GENERATED ALWAYS AS IDENTITY` thay UUID
-
-ID nhất quán, dễ đọc log/test tay (so với UUID dài khó debug bằng mắt) — hợp quy mô demo 3 ngày, không cần chống đoán ID giữa service (không phải public-facing ID lộ ra ngoài internet). Vì giờ có FK thật, rủi ro "ID lệch giữa các DB" của bản cũ (phải tự khớp tay `tenant_id` giữa 3 database) **không còn tồn tại** — `room.tenant_id`/`booking.room_id` giờ tham chiếu trực tiếp đúng `id` thật trong cùng database, Postgres tự báo lỗi ngay nếu sai, không thể âm thầm lệch.
+ID nhất quán, dễ đọc log/test tay — hợp quy mô demo 3 ngày, không cần chống đoán ID (không phải public-facing ID lộ ra internet). Vì có FK ghép thật, rủi ro "tenant_id lệch giữa các bảng" **không còn tồn tại** — Postgres tự chặn ngay lúc insert nếu sai, không thể âm thầm lệch.

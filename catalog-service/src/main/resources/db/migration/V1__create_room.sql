@@ -6,7 +6,10 @@ CREATE TABLE room (
     name      VARCHAR(100) NOT NULL,
     price     NUMERIC(10, 2) NOT NULL,
     available BOOLEAN NOT NULL DEFAULT TRUE,
-    CONSTRAINT chk_room_price_positive CHECK (price > 0)
+    CONSTRAINT chk_room_price_positive CHECK (price > 0),
+    -- Composite unique để booking.(tenant_id, room_id) có thể FK ghép xuống đây,
+    -- chặn booking trỏ vào room thuộc tenant khác (xem docs/erd-v2.md mục 3).
+    CONSTRAINT uq_room_tenant_id UNIQUE (tenant_id, id)
 );
 
 CREATE INDEX idx_room_tenant_id ON room (tenant_id);
