@@ -50,7 +50,7 @@ Gateway **bỏ đúng một tiền tố `/api`** bằng `StripPrefix=1` (hoặc 
 |---|---|---|---|---|---|
 | `GET /api/hotels` | `GET /hotels` | `USER`, `ADMIN` | 200 | 401 | B |
 | `GET /api/hotels/{hotelId}/availability?checkIn=&checkOut=` | `GET /hotels/{hotelId}/availability` | `USER`, `ADMIN` | 200 | 400, 404 | B |
-| `POST /api/hotels/{hotelId}/room-types` | `POST /hotels/{hotelId}/room-types` | `ADMIN` | 201 | 400, 403, 404, 409 | B |
+| `POST /api/hotels/{hotelId}/room-types` | `POST /hotels/{hotelId}/room-types` | `ADMIN` | 201 | 400, 403, 404 | B |
 | `PUT /api/room-types/{id}/price` | `PUT /room-types/{id}/price` | `ADMIN` | 200 | 400, 403, 404 | B |
 | `GET /api/admin/hotels/{hotelId}/inventory?checkIn=&checkOut=` | `GET /admin/hotels/{hotelId}/inventory` | `ADMIN` | 200 | 400, 403, 404 | B |
 | `POST /api/bookings` | `POST /bookings` | `USER` | 201 | 400, 403, 404, 409 | C |
@@ -298,7 +298,7 @@ Kết quả tìm kiếm có thể cũ ngay sau khi trả về, nên `POST /api/b
 | `totalRooms` | Số nguyên JSON từ 1 đến 1000 |
 
 - Không nhận tenant từ client; `tenant_id` lấy từ JWT. Trường `tenantId` lạ nếu bị gửi thêm cũng **không có tác dụng**.
-- Trong **cùng một transaction**, Catalog thêm loại phòng và tạo một dòng `room_inventory` cho mỗi đêm từ hôm nay đến hết khoảng mở bán (`total = totalRooms`, `sold = 0`). Thiếu bước này thì loại phòng không bao giờ hiện trong kết quả tìm kiếm.
+- Trong **cùng một transaction**, Catalog thêm loại phòng và tạo một dòng `room_inventory` cho mỗi đêm từ hôm nay (giờ Việt Nam) đến hết `2027-01-31` (`total = totalRooms`, `sold = 0`); nếu hôm nay đã sau ngày đó thì không tạo dòng nào. Thiếu bước này thì loại phòng không bao giờ hiện trong kết quả tìm kiếm.
 - **201** + `RoomType`.
 - `USER` gọi dù body đúng hay sai → **403**. Khách sạn không có trong tenant → **404**. Không kiểm tra mã `code` vì `room_type` không có trường này.
 
@@ -506,14 +506,14 @@ ID dưới đây theo thứ tự seed trong migration và **chỉ đúng trên D
 | Role | `USER`, `ADMIN` | A |
 | Booking status | `PENDING_PAYMENT`, `CONFIRMED`, `CANCELLED`, `EXPIRED` | C |
 
-| ID loại phòng | Tenant | Khách sạn | `basePrice` mỗi đêm | `totalRooms` | Dùng cho |
+| ID loại phòng | Tenant | Khách sạn | Tên | `basePrice` mỗi đêm | `totalRooms` | Dùng cho |
 |---|---|---|---|---|---|---|
-| `1` | 1 | 1 | 500,000 | 3 | Happy path |
-| `2` | 1 | 1 | `DLX` | 900,000 | 4 | Happy path, kiểm thử hết phòng |
-| `3` | 2 | 2 | `STD` | 450,000 | 5 | Kiểm thử khác tenant |
-| `4` | 2 | 2 | `DLX` | 850,000 | 6 | Kiểm thử khác tenant |
-| `5` | 1 | 3 | `RACE` | 500,000 | 1 | **Chỉ** dùng cho race test |
-| `6` | 1 | 3 | `STD` | 600,000 | 5 | Happy path khách sạn thứ hai |
+| `1` | 1 | 1 | Standard | 500,000 | 3 | Happy path |
+| `2` | 1 | 1 | Deluxe | 900,000 | 4 | Happy path, kiểm thử hết phòng |
+| `3` | 2 | 2 | Standard | 450,000 | 5 | Kiểm thử khác tenant |
+| `4` | 2 | 2 | Deluxe | 850,000 | 6 | Kiểm thử khác tenant |
+| `5` | 1 | 3 | Race Test | 500,000 | 1 | **Chỉ** dùng cho race test |
+| `6` | 1 | 3 | Standard | 600,000 | 5 | Happy path khách sạn thứ hai |
 
 | Alias | Mẫu trong `docker/seed/seed-app-users.example.sql` | Tenant, role |
 |---|---|---|
@@ -611,7 +611,7 @@ D **không đưa token/client secret/private key vào `docs/demo.http`**. Dùng 
 
 G2 chỉ **PASS khi tất cả mục sau hoàn thành**:
 
-- [ ] A/B/C/D cùng đồng ý **đổi scope sang `room_inventory`** theo `erd-v2.md` (plan §1.2 đang ghi không làm), đồng ý **có thanh toán mô phỏng, huỷ, hết hạn** và **bỏ gán phòng cho booking**; đồng ý owner như §0.
+- [ ] A/B/C/D cùng đồng ý **đổi scope sang `room_inventory`** theo `erd-v2.md`, đồng ý **có thanh toán mô phỏng, huỷ, hết hạn** và **bỏ gán phòng cho booking**; đồng ý owner như §0.
 - [ ] A xác nhận **`tenant_id` là số nguyên JSON**, email trong JWT là chữ thường, **IAM redirect `.../callback/`**, OAuth redirect IAM/PKCE, issuer, JWT claim validator, CORS, **4 route Gateway ở §6** và lỗi email chưa provision **403**; đồng thời sửa các mục lỗi thời trong plan (§12).
 - [ ] B xác nhận JSON Hotel/RoomType/Availability/Inventory, `tenantId` là số, giới hạn giá, tenant isolation, ID seed, khoảng mở bán và việc tạo dòng tồn khi thêm loại phòng.
 - [ ] C xác nhận JSON Booking, ownership theo `user_email`, trình tự trừ tồn §5.2, bảng trạng thái §5.5/§5.6, job §5.7 và các giới hạn §9.
@@ -664,7 +664,7 @@ G2 chỉ **PASS khi tất cả mục sau hoàn thành**:
 
 | Tài liệu hoặc code | Chưa khớp | Owner |
 |---|---|---|
-| `iam-google-sso-demo-plan-v2.md` | Các mô tả cũ về room vật lý/booking theo giờ trong phần roadmap và sơ đồ phụ lục đã được ghi rõ là nội dung thay thế; schema/API chuẩn nằm ở §4–5 của plan | A/C |
+| `iam-google-sso-demo-plan-v2.md` | Đã sửa ngày 03/11/2026: `users` → `app_user`, mục B/C, timeline, handoff, kịch bản demo, DoD theo `room_inventory` | A/C |
 | `booking-policy.md`, `sequence-booking.md` | Đã đồng bộ với giữ tồn theo đêm, huỷ `PENDING_PAYMENT` và trả tồn | C |
 | `erd-v2.md` | Đã đồng bộ `hotel.address`, bỏ `room_type.code`, ghi rõ giá mỗi phòng/đêm và huỷ `PENDING_PAYMENT` | B/C |
 | `booking-service/README.md`, code và migration | Cần được đối chiếu khi triển khai contract hiện hành theo đêm | B/C |
