@@ -1,100 +1,174 @@
-# ERD & Database Design — theo `iam-google-sso-demo-plan-v2.md` (bản 1 database, đặt phòng theo khoảng thời gian)
+# ERD & Database Design — tìm phòng theo thời gian, booking và huỷ
 
-> 1 database Postgres chung `hotelbooking`, 1 schema `public`. Đặt phòng theo **khoảng thời gian thật** (`check_in`/`check_out` có giờ cụ thể), không phải cờ on/off tĩnh — vì 1 phòng có thể được nhiều khách đặt ở các khoảng thời gian khác nhau, miễn không đè giờ nhau.
+> Một PostgreSQL database `hotelbooking`, schema `public`. Tình trạng trống được xác định theo khoảng thời gian người dùng tìm kiếm (`check_in`, `check_out`). Booking đang chờ thanh toán cũng giữ phòng; huỷ booking giải phóng đúng khoảng thời gian đó.
 
-## 1. ERD
+## 1. Mô hình dữ liệu
 
 ```mermaid
 erDiagram
-    TENANT ||--o{ APP_USER : "có"
+    TENANT ||--o{ USERS : "có"
     TENANT ||--o{ ROOM : "sở hữu"
     TENANT ||--o{ BOOKING : "sở hữu"
-    ROOM ||--o{ BOOKING : "được đặt trong khoảng [check_in, check_out)"
-    APP_USER ||--o{ BOOKING : "đặt bởi (FK ghép tenant_id+email)"
+    ROOM ||--o{ BOOKING : "được giữ/đặt"
+    USERS ||--o{ BOOKING : "đặt bởi email"
 
     TENANT {
         BIGINT id PK
         VARCHAR name
     }
-    APP_USER {
+    USERS {
         BIGINT id PK
-        VARCHAR email "UNIQUE, NOT NULL, phải lowercase (CHECK)"
+        VARCHAR email "UNIQUE, NOT NULL, lowercase"
         BIGINT tenant_id FK
-        VARCHAR role "CHECK IN (USER, ADMIN)"
+        VARCHAR role "USER hoặc ADMIN"
         VARCHAR google_sub "nullable, UNIQUE"
     }
     ROOM {
         BIGINT id PK
         BIGINT tenant_id FK
         VARCHAR name
-        NUMERIC price "CHECK price > 0"
+        VARCHAR room_type
+        INTEGER capacity
+        NUMERIC price
+        VARCHAR operational_status "ACTIVE hoặc MAINTENANCE"
     }
     BOOKING {
         BIGINT id PK
         BIGINT tenant_id FK
-        BIGINT room_id "FK ghép (tenant_id, room_id)"
-        VARCHAR user_email "FK ghép (tenant_id, user_email), phải lowercase"
+        BIGINT room_id FK
+        VARCHAR email FK
         TIMESTAMPTZ check_in
-        TIMESTAMPTZ check_out "CHECK check_out > check_in"
-        VARCHAR status "CHECK status = CONFIRMED"
+        TIMESTAMPTZ check_out
+        VARCHAR status "PENDING_PAYMENT, CONFIRMED, CANCELLED, EXPIRED"
+        BIGINT assigned_by FK
         TIMESTAMPTZ created_at
     }
 ```
 
-**Thay đổi so với bản trước:** `room` **không còn cột `available`** — "còn trống" không phải thuộc tính tĩnh của phòng nữa, mà phụ thuộc vào **có booking nào đã chiếm khoảng giờ đó chưa**. `booking` thêm `check_in`, `check_out` kiểu `TIMESTAMPTZ` (có giờ, không chỉ ngày).
+**Tên bảng user:** nghiệp vụ gọi là `user`; tên vật lý PostgreSQL dùng `users` để tránh đụng từ khóa `USER`. Booking dùng cột `email`, không dùng tên `user_email`.
 
-**Ai sở hữu bảng nào:** `TENANT`, `APP_USER` → A (`iam-service`). `ROOM` → B (`catalog-service`). `BOOKING` → C (`booking-service`).
+| Bảng | Service sở hữu | Trường/ràng buộc chính |
+|---|---|---|
+| `tenant` | IAM | `id`, `name` |
+| `users` | IAM | `id`, `email` unique/lowercase, `tenant_id`, `role`, `google_sub`; unique `(tenant_id, email)` |
+| `room` | Catalog | `id`, `tenant_id`, `name`, `room_type`, `capacity`, `price`, `operational_status` (`ACTIVE`/`MAINTENANCE`); unique `(tenant_id, id)` |
+| `booking` | Booking | `id`, `tenant_id`, `room_id`, `email`, `check_in`, `check_out`, `status`, `assigned_by`, `created_at`; FK ghép giữ tenant nhất quán |
 
-## 2. Vì sao phải lưu GIỜ, không chỉ NGÀY — ví dụ thật đã test
+`room.operational_status` là tình trạng vận hành của phòng (`ACTIVE`/`MAINTENANCE`); phòng bảo trì không được bán. Trong response tìm kiếm, trường `status` là `AVAILABLE`/`BOOKED` được tính theo khung giờ yêu cầu. Không lưu trạng thái trống tĩnh trên room vì phòng có thể đã đặt buổi sáng nhưng trống buổi tối. `checkIn`/`checkOut` là tiêu chí tìm kiếm và nằm trên booking; không phải cột cố định của room.
 
-Ví dụ: khách A đặt ngày 2 → ngày 3, khách B đặt ngày 3 → ngày 4 (cùng phòng). Khách sạn có giờ **check-in 12:00 trưa, check-out 14:00 chiều**.
+## 2. Tìm kiếm phòng theo lựa chọn và thời gian
 
-Nếu chỉ lưu `DATE` (không giờ): hệ thống sẽ coi 2 booking này **không đè nhau** (A kết thúc "ngày 3", B bắt đầu "ngày 3" — tưởng là bàn giao sạch). Nhưng tính theo giờ thật: A ở tới **14:00 ngày 3**, B muốn vào từ **12:00 ngày 3** → **2 giờ (12:00–14:00 ngày 3) cả hai cùng có quyền ở trong phòng** — đây là xung đột thật, hệ thống phải từ chối 1 trong 2. Chỉ lưu `DATE` sẽ **không phát hiện được** lỗi này.
+Người dùng chưa thấy danh sách phòng ngay khi mở trang. UI thu thập các tiêu chí bắt buộc rồi chỉ gọi tìm kiếm sau khi người dùng bấm **Tìm kiếm**:
 
-**Đã test bằng Postgres thật:**
+- `checkIn` và `checkOut` (timestamp có timezone; `checkOut > checkIn`);
+- số khách (`guestCount`);
+- loại phòng nếu người dùng chọn (`roomType`), cùng các bộ lọc tùy chọn được UI cung cấp.
 
-| Giờ check-in/check-out | A | B (liền ngày, cùng phòng) | Kết quả |
-|---|---|---|---|
-| check-in 12:00, check-out 14:00 (checkin SỚM hơn checkout — như ví dụ bạn đưa ra) | ngày 2 12:00 → ngày 3 14:00 | ngày 3 12:00 → ngày 4 14:00 | ❌ bị chặn — đè giờ 12:00–14:00 ngày 3 (`EXCLUDE constraint` báo `conflicting key value`) |
-| check-in 14:00, check-out 11:00 (checkout SỚM hơn checkin — cách khách sạn thường làm, có buffer dọn phòng) | ngày 2 14:00 → ngày 3 11:00 | ngày 3 14:00 → ngày 4 11:00 | ✅ cho qua — không đè giờ nào |
+Ví dụ: `GET /api/rooms/search?checkIn=2026-11-10T14:00:00%2B07:00&checkOut=2026-11-12T11:00:00%2B07:00&guestCount=2&roomType=DELUXE`.
 
-→ Nếu khách sạn thật sự định checkin-sớm-hơn-checkout như ví dụ đầu, 2 booking liền ngày **sẽ luôn xung đột 2 giờ cuối** — đây không phải bug, mà là đúng theo giờ chính sách đã khai; muốn cho phép đặt liền ngày không xung đột thì checkout phải **sớm hơn hoặc bằng** checkin (ví dụ checkout 11:00/12:00, checkin 14:00 — quy ước phổ biến ở khách sạn thật, để có thời gian dọn phòng).
+Catalog chỉ trả phòng tenant hiện tại có `room.operational_status='ACTIVE'`, đủ sức chứa/đúng loại phòng, và **không có booking đang giữ hoặc đã xác nhận chồng thời gian**. Response phòng tìm kiếm có `status='AVAILABLE'`. User B không nhận được phòng đang nằm trong booking `PENDING_PAYMENT` của A; sau khi booking A được huỷ, phòng xuất hiện lại trong kết quả nếu các tiêu chí và thời gian vẫn khớp.
 
-## 3. Cơ chế chống tranh giờ — `EXCLUDE` constraint (thay cho `UPDATE ... WHERE available=true` cũ)
+## 3. Trạng thái booking, thanh toán và huỷ
+
+Các trạng thái:
+
+| Booking status | Có giữ khoảng thời gian không? | Ý nghĩa |
+|---|---:|---|
+| `PENDING_PAYMENT` | Có | User đã chọn phòng và đang thanh toán; ẩn phòng khỏi kết quả tìm kiếm trùng thời gian |
+| `CONFIRMED` | Có | Thanh toán thành công/booking được xác nhận |
+| `CANCELLED` | Không | Đã huỷ; giải phóng khoảng thời gian để user khác tìm và đặt |
+| `EXPIRED` | Không | Hết thời hạn thanh toán; giải phóng phòng |
+
+Room có `operational_status='MAINTENANCE'` sẽ không hiện trong kết quả tìm kiếm kể cả khi không có booking. `ACTIVE` chỉ có nghĩa phòng vận hành được; availability vẫn phải được tính theo ngày/giờ yêu cầu.
+
+Flow chính:
+
+1. User chọn tiêu chí và bấm Tìm kiếm; chọn một phòng `AVAILABLE` trong khoảng thời gian mong muốn.
+2. Booking service kiểm tra quyền và room còn phù hợp, rồi insert booking `PENDING_PAYMENT` với `room_id`, `email`, `check_in`, `check_out`. Exclusion constraint giữ khoảng giờ ngay trong transaction insert. Từ lúc này, user B tìm cùng khoảng giờ sẽ không thấy phòng đó.
+3. Thanh toán thành công chuyển booking `PENDING_PAYMENT → CONFIRMED`; khoảng giờ tiếp tục bị chiếm.
+4. User huỷ booking khi còn được phép: chuyển sang `CANCELLED`. Booking không còn chặn tìm kiếm; phòng lại xuất hiện cho user B ở khoảng giờ bị giải phóng. Nếu thanh toán đã thu tiền, refund là flow riêng cần tích hợp/chính sách rõ ràng.
+5. Booking không thanh toán trong thời hạn cấu hình chuyển `PENDING_PAYMENT → EXPIRED`, giải phóng phòng để không bị giữ vô hạn.
+
+Chỉ cho huỷ booking thuộc chính user, hoặc admin trong tenant theo chính sách. Huỷ phải cập nhật trạng thái có điều kiện/transaction để không giải phóng nhầm booking đã thay đổi trạng thái.
+
+## 4. Ràng buộc chống đặt chồng giờ
+
+Không làm `SELECT` availability rồi insert tách rời mà không có khóa/ràng buộc DB, vì hai request đồng thời có thể cùng thấy phòng trống. Dùng exclusion constraint PostgreSQL để chặn overlap ở tầng DB:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 
-CREATE TABLE booking (
-    ...
-    check_in   TIMESTAMPTZ NOT NULL,
-    check_out  TIMESTAMPTZ NOT NULL,
-    status     VARCHAR(20) NOT NULL DEFAULT 'CONFIRMED',
-    ...
-    CONSTRAINT excl_booking_room_overlap
-        EXCLUDE USING gist (room_id WITH =, tstzrange(check_in, check_out) WITH &&)
-        WHERE (status = 'CONFIRMED')
-);
+ALTER TABLE booking
+    ADD CONSTRAINT chk_booking_time
+        CHECK (check_out > check_in),
+    ADD CONSTRAINT excl_active_room_booking_overlap
+        EXCLUDE USING gist (
+            tenant_id WITH =,
+            room_id WITH =,
+            tstzrange(check_in, check_out, '[)') WITH &&
+        )
+        WHERE (status IN ('PENDING_PAYMENT', 'CONFIRMED'));
 ```
 
-`EXCLUDE` là constraint của Postgres: với mọi 2 row **cùng `room_id`**, nếu khoảng `[check_in, check_out)` của chúng **giao nhau** (`&&`), Postgres **tự chặn INSERT/UPDATE thứ hai**, trả lỗi `conflicting key value violates exclusion constraint`. Đây là cơ chế **atomic thật ở tầng DB** — không cần tự `SELECT` kiểm tra rồi `INSERT` (cách đó có race condition: 2 request đọc "còn trống" cùng lúc trước khi request nào insert xong). `btree_gist` là extension bắt buộc để tạo index GiST kết hợp cột thường (`room_id`, so sánh `=`) với cột kiểu range (`tstzrange`, so sánh `&&`).
+Khoảng `[check_in, check_out)` bao gồm giờ check-in và không bao gồm giờ check-out. Hai booking cho cùng phòng được phép nối tiếp nhau khi khoảng giờ không giao nhau. Exclusion constraint làm cho một trong hai booking cạnh tranh bị từ chối; API ánh xạ xung đột này thành `409 Conflict`.
 
-**Vì sao dùng `tstzrange` chứ không phải `tsrange`:** cột khai `TIMESTAMPTZ` (có timezone) thì hàm range tương ứng là `tstzrange`; dùng nhầm `tsrange` (dành cho `TIMESTAMP` không timezone) sẽ lỗi ngay lúc tạo bảng — đã gặp lỗi này thật lúc test và sửa lại.
+Khi huỷ hoặc hết hạn, đổi status khỏi tập `PENDING_PAYMENT`/`CONFIRMED`; booking không còn tham gia exclusion constraint, nên cùng phòng có thể được đặt ở khoảng giờ đó. Không xoá booking lịch sử.
 
-**`WHERE (status = 'CONFIRMED')`:** đề phòng sau này có thêm trạng thái khác (ví dụ `CANCELLED` nếu làm thêm hủy booking) — booking đã hủy không còn chiếm giờ, không tính vào exclusion. Hiện tại `status` luôn là `CONFIRMED` (v2 chưa làm hủy) nên điều kiện này chưa có hiệu lực khác biệt, nhưng để sẵn cho đúng logic nếu mở rộng.
+## 5. FK và tenant isolation
 
-## 4. Ảnh hưởng tới API — cần cập nhật `POST /bookings`
+```sql
+-- users
+CONSTRAINT uq_users_tenant_email UNIQUE (tenant_id, email)
 
-API `POST /bookings` (do C/`booking-service` triển khai) giờ phải nhận thêm `checkIn`, `checkOut` trong request body (trước đây chỉ có `roomId`), ví dụ:
+-- room
+CONSTRAINT uq_room_tenant_id UNIQUE (tenant_id, id)
+
+-- booking
+FOREIGN KEY (tenant_id, room_id) REFERENCES room (tenant_id, id),
+FOREIGN KEY (tenant_id, email) REFERENCES users (tenant_id, email)
+```
+
+`tenant_id` và `email` phải lấy từ JWT đã xác minh, không lấy từ body do client gửi. `assigned_by` lưu user Admin đã thực hiện điều phối, nếu có.
+
+## 6. Quyền xem số lượng và điều phối phòng
+
+- User thường chỉ tìm/xem các phòng còn trống khớp tiêu chí và thời gian; không được xem tổng inventory tenant hoặc danh sách điều phối. Số phòng trong kết quả tìm kiếm chỉ là kết quả khớp filter.
+- Chỉ `ADMIN` được xem tổng số phòng theo tenant và tình trạng vận hành, số phòng trống/đang giữ trong một khoảng giờ, danh sách booking cần xếp phòng và gán/đổi phòng.
+- Mọi lần gán phòng phải kiểm tra room cùng tenant, `room.operational_status='ACTIVE'`, đủ sức chứa và không có booking `PENDING_PAYMENT`/`CONFIRMED` bị overlap trong khoảng đó. Ghi Admin thực hiện vào `assigned_by`/audit log.
+- Nếu user đã chọn phòng cụ thể khi đặt, Admin chỉ được đổi sang phòng thay thế còn trống cho đúng khoảng giờ. Cập nhật room/booking và kiểm tra overlap phải nguyên tử để không tạo double booking.
+
+## 7. API flow
+
+### Tìm phòng
+
+`GET /api/rooms/search` yêu cầu `checkIn`, `checkOut`, `guestCount`; `roomType` là tùy chọn. Không trả danh sách trước khi tiêu chí hợp lệ và người dùng bấm tìm kiếm. Mỗi kết quả có `status='AVAILABLE'` theo khoảng giờ yêu cầu.
+
+### Tạo booking / thanh toán
+
 ```json
-{ "roomId": 1, "checkIn": "2026-11-02T12:00:00+07:00", "checkOut": "2026-11-03T14:00:00+07:00" }
+{
+  "roomId": 1,
+  "checkIn": "2026-11-10T14:00:00+07:00",
+  "checkOut": "2026-11-12T11:00:00+07:00"
+}
 ```
-Và `GET /rooms` (do B/`catalog-service` triển khai) nếu muốn trả về "còn trống hay không" cho 1 khoảng thời gian cụ thể, cần thêm query param (`checkIn`/`checkOut`) và tự `SELECT` từ bảng `booking` (gọi sang `booking-service`, hoặc đọc trực tiếp bảng `booking` nếu chấp nhận đọc chéo bảng trong cùng DB) để tính "trống" — **không còn** cột `room.available` để đọc trực tiếp như trước.
 
-## 5. Vì sao vẫn cần verify `tenant_id` từ JWT ở code, dù đã có FK ghép
+Booking lấy `tenant_id`/`email` từ JWT, ghi booking `PENDING_PAYMENT` cùng khoảng giờ. Exclusion constraint trong DB giữ khoảng giờ ngay khi insert; thanh toán thành công chuyển thành `CONFIRMED`. Trùng giờ hoặc phòng vừa được người khác giữ trả `409`.
 
-Không đổi so với bản trước: FK ghép (`(tenant_id, room_id) → room(tenant_id, id)`, `(tenant_id, user_email) → app_user(tenant_id, email)`) chặn được dữ liệu rác (booking trỏ sai tenant), nhưng không thay được việc đọc đúng `tenant_id` từ JWT đã verify ở code — nếu code tin tham số client gửi lên, vẫn có thể tạo ra 1 cặp `(tenant_id, room_id)` "hợp lệ" nhưng tenant đó không phải tenant thật của người gọi.
+### Huỷ booking
 
-## 6. Thứ tự migrate bắt buộc (không đổi)
+`POST /api/bookings/{id}/cancel`: user huỷ booking của mình (hoặc Admin trong tenant theo policy); thành công chuyển thành `CANCELLED`. Lần tìm kiếm kế tiếp cho cùng khung giờ có thể trả phòng vừa được giải phóng. Request lặp lại phải trả kết quả ổn định và không giải phóng một booking khác.
 
-A (`iam-service`: `tenant`, `app_user`) → B (`catalog-service`: `room`) → C (`booking-service`: `booking`, cần cả `tenant`/`room`/`app_user` đã tồn tại). Mỗi service dùng riêng `spring.flyway.table` (`flyway_schema_history_iam/_catalog/_booking`).
+### Admin inventory / assign
+
+`GET /api/admin/rooms/summary?checkIn=...&checkOut=...`, `GET /api/admin/rooms?checkIn=...&checkOut=...` và `PUT /api/admin/bookings/{id}/room` chỉ cho `ADMIN`. Summary trả tổng số phòng cùng số `AVAILABLE`/`BOOKED` trong khoảng đã chọn; danh sách Admin có thể xem cả trạng thái vận hành/bận. Endpoint kiểm tra/gán phòng chỉ thao tác trong tenant từ JWT; user thường nhận `403`.
+
+## 8. Thứ tự migration
+
+```mermaid
+flowchart LR
+    A["A: iam-service<br/>tenant, users"] --> B["B: catalog-service<br/>room"]
+    B --> C["C: booking-service<br/>booking + time constraints"]
+```
+
+Chạy lần đầu trên DB sạch theo A → B → C vì FK tham chiếu bảng service trước. Mỗi service dùng bảng Flyway history riêng (`flyway_schema_history_iam`, `_catalog`, `_booking`).
