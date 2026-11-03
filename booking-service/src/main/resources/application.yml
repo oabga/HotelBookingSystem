@@ -30,8 +30,7 @@ spring:
           # không dùng issuer-uri (sẽ cố gọi discovery và fail).
           jwk-set-uri: http://localhost:8084/.well-known/jwks.json
 
-services:
-  catalog-service:
-    base-url: http://localhost:8081
-  notification-service:
-    base-url: http://localhost:8083
+security:
+  jwt:
+    # Giá trị claim "iss" phải khớp khi xác minh token; không gọi discovery.
+    issuer: http://localhost:8084
