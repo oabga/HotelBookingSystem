@@ -8,7 +8,7 @@
 ## 0. Quyết định chung và ranh giới
 
 - **Google SSO thay V-ID**, thông qua `iam-service` đóng vai trò **OAuth2/OIDC client của Google**; IAM phát **JWT nội bộ** RS256. Không dùng Keycloak; không xây OAuth2 authorization server riêng.
-- Có **2 tenant**, 2 role `USER` và `ADMIN`. Một tenant có thể có nhiều khách sạn. `USER` tìm phòng, đặt, thanh toán mô phỏng và huỷ đơn của mình. `ADMIN` thêm loại phòng, sửa giá, xem tồn kho, xem và huỷ booking trong tenant mình. `ADMIN` **không** tạo hoặc thanh toán booking.
+- Có **2 tenant**, 2 role `USER` và `ADMIN`. Một tenant có thể có nhiều khách sạn. `USER` tìm phòng, đặt, thanh toán mô phỏng và huỷ đơn của mình. `ADMIN` thêm loại phòng, sửa giá, xem tồn kho và xem booking trong tenant mình. `ADMIN` **không** tạo, thanh toán hoặc huỷ booking.
 - **Flow chính:** khách chọn khách sạn, ngày nhận và trả phòng, bấm Tìm kiếm; hệ thống đọc `room_type` và `room_inventory`, rồi chỉ trả về các loại phòng còn trống ở mọi đêm trong kỳ ở.
 - Đơn vị bán là **loại phòng theo từng đêm**, không phải phòng cụ thể. Kỳ ở là khoảng ngày `[checkIn, checkOut)`: tính đêm `checkIn`, không tính đêm `checkOut`.
 - Đặt phòng tạo đơn `PENDING_PAYMENT` và **trừ tồn ngay**. Thanh toán mô phỏng chuyển đơn sang `CONFIRMED`. User chủ đơn huỷ khi còn `PENDING_PAYMENT` sẽ chuyển sang `CANCELLED` và trả tồn; quá hạn chuyển `EXPIRED` và cũng trả tồn. Trừ/hoàn tồn và ghi/cập nhật booking nằm trong cùng transaction.
@@ -57,7 +57,7 @@ Gateway **bỏ đúng một tiền tố `/api`** bằng `StripPrefix=1` (hoặc 
 | `GET /api/bookings` | `GET /bookings` | `USER`, `ADMIN` | 200 | 401 | C |
 | `GET /api/bookings/{id}` | `GET /bookings/{id}` | `USER`, `ADMIN` | 200 | 400, 404 | C |
 | `POST /api/bookings/{id}/payment` | `POST /bookings/{id}/payment` | `USER` là chủ đơn | 200 | 400, 403, 404, 409 | C |
-| `POST /api/bookings/{id}/cancel` | `POST /bookings/{id}/cancel` | `USER` là chủ đơn | 200 | 400, 404, 409 | C |
+| `POST /api/bookings/{id}/cancel` | `POST /bookings/{id}/cancel` | `USER` là chủ đơn | 200 | 400, 403, 404, 409 | C |
 
 | Direct call (không qua Gateway) | Người gọi | Quyền/yêu cầu | Thành công | Lỗi chính | Owner |
 |---|---|---|---|---|---|
@@ -457,7 +457,7 @@ Chỉ `USER` là chủ đơn được huỷ. Không có body. Trong flow demo, c
 | `CANCELLED` (huỷ lại) | **200** + Booking `CANCELLED` | **Không đổi** |
 | `EXPIRED` | **409** | Không đổi |
 
-ID sai → **400**. Đơn không tồn tại, khác tenant, hoặc `USER` không phải chủ → **404**. Thanh toán và huỷ gửi cùng lúc thì chỉ một bên đổi được trạng thái, kết quả cuối vẫn nhất quán với tồn kho. Lần tìm kiếm kế tiếp có thể thấy lại phòng vừa được trả.
+`ADMIN` → **403**. ID sai → **400**. Đơn không tồn tại, khác tenant, hoặc `USER` không phải chủ → **404**. Thanh toán và huỷ gửi cùng lúc thì chỉ một bên đổi được trạng thái, kết quả cuối vẫn nhất quán với tồn kho. Lần tìm kiếm kế tiếp có thể thấy lại phòng vừa được trả.
 
 ### 5.7 Hết hạn thanh toán
 
@@ -574,7 +574,7 @@ Kỳ ở mẫu `2026-11-24` → `2026-11-26` chỉ áp dụng khi còn ở tươ
 | T30 | Thanh toán lại đơn đã `CONFIRMED`, đơn đã huỷ, đơn đã quá hạn | 409 mỗi trường hợp, không đổi dữ liệu | C/D |
 | T31 | USER_1B hoặc USER_2 thanh toán đơn của USER_1; ADMIN_1 thanh toán | 404 với USER, 403 với ADMIN | C/D |
 | T32 | USER_1 huỷ đơn của mình, rồi huỷ lại | Cả hai 200 `CANCELLED`; `sold` chỉ giảm một lần; tìm kiếm thấy lại phòng | C/D |
-| T33 | ADMIN_1 huỷ đơn trong tenant; ADMIN_2 huỷ đơn đó | 200 với ADMIN_1, 404 với ADMIN_2 | C/D |
+| T33 | ADMIN_1 huỷ đơn trong tenant; ADMIN_2 huỷ đơn đó | 403 ở cả hai, trạng thái đơn và `sold` không đổi | C/D |
 | T34 | Đơn quá hạn thanh toán sau khi job chạy (test đặt thời hạn ngắn) | `EXPIRED`, `sold` được trả; huỷ đơn đó → 409 | C/D |
 | T35 | ADMIN_1 xem inventory khách sạn `1`; USER_1 gọi; ADMIN_1 gọi khách sạn `2` | 200 đúng `total`/`sold`/`available`; 403; 404 | B/D |
 | T36 | Sửa giá loại `1` sau khi đã có đơn, rồi đặt đơn mới | `totalAmount` đơn cũ không đổi, đơn mới theo giá mới | B/C/D |
