@@ -59,7 +59,7 @@
         doc.getElementById("user-role").textContent = claims.role;
         doc.getElementById("user-tenant").textContent = String(claims.tenant_id);
         loginStatus.textContent = "Đã nhận JWT; claims chỉ để hiển thị, frontend chưa xác minh chữ ký.";
-        integrationStatus.textContent = "JWT trong memory; Rooms, Booking và ADMIN gọi qua Gateway.";
+        integrationStatus.textContent = "JWT trong memory; Hotels, Booking và ADMIN gọi qua Gateway.";
       } catch (_error) {
         loginStatus.textContent = "Token callback không hợp lệ. Hãy đăng nhập lại.";
       }

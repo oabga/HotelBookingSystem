@@ -7,7 +7,7 @@ for (const [port, app] of [[3000, "app1"], [3001, "app2"]]) {
     const pathname = new URL(request.url, "http://localhost").pathname;
     const file = pathname === "/" || pathname === "/callback/"
       ? path.join(__dirname, app, "index.html")
-      : ["/auth.js", "/rooms.js", "/demo-ui.js", "/styles.css"].includes(pathname)
+      : ["/auth.js", "/api.js", "/bookings.js", "/catalog.js", "/admin.js", "/app.js", "/styles.css"].includes(pathname)
         ? path.join(__dirname, pathname.slice(1))
         : null;
 
