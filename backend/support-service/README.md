@@ -74,4 +74,4 @@ docker compose --profile dev-test up --build -d --wait
 
 - ADMIN gọi trực tiếp `POST /api/bookings/{id}/reschedule` thì đổi được ngày mà không qua phiếu; quyền này ADMIN đã có khi duyệt nên chưa chặn.
 - Phiếu chờ quá lâu không tự hết hạn. Nếu đơn đã tới ngày nhận phòng, duyệt sẽ trả 409 và admin từ chối phiếu.
-- Tài liệu đề xuất v4 trong `docs/new/` vẫn mô tả ticket chung và Keycloak; service này đi theo yêu cầu đổi ngày và IAM hiện tại.
+- Contract v5 trong `docs/documents/` vẫn mô tả ticket chung và ghi notification ngoài phạm vi MVP; service này đi theo yêu cầu đổi ngày. Hai bên cần được thống nhất ở G2.
