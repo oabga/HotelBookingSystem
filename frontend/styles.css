@@ -7,7 +7,7 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; }
-button, input, select { font: inherit; }
+button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
 
@@ -52,8 +52,8 @@ button:disabled { cursor: not-allowed; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .field { display: block; min-width: 0; color: #314d45; font-size: .88rem; font-weight: 650; }
 .field.full { grid-column: 1 / -1; }
-.field input, .field select { display: block; width: 100%; margin-top: 7px; padding: 11px 12px; border: 1px solid #cbd9d2; border-radius: 8px; color: #173a30; background: #fff; }
-.field input:focus, .field select:focus { outline: 2px solid #47a885; outline-offset: 1px; }
+.field input, .field select, .field textarea { display: block; width: 100%; margin-top: 7px; padding: 11px 12px; border: 1px solid #cbd9d2; border-radius: 8px; color: #173a30; background: #fff; }
+.field input:focus, .field select:focus, .field textarea:focus { outline: 2px solid #47a885; outline-offset: 1px; }
 .action-button { margin-top: 16px; padding: 11px 16px; border: 0; border-radius: 9px; color: white; background: #146d5b; font-weight: 750; }
 .action-button:hover:not(:disabled) { background: #0e5446; }
 .action-button:disabled { background: #899e95; }
@@ -78,6 +78,22 @@ button:disabled { cursor: not-allowed; }
 .pill-confirmed { color: #0e5446; background: #dcf3e8; }
 .pill-cancelled { color: #5b6d66; background: #e9eeeb; }
 .pill-expired { color: #9a2f22; background: #fbe6e2; }
+.pill-open { color: #1f5a85; background: #e0effa; }
+.pill-in_progress { color: #8a5a00; background: #fdf1d6; }
+.pill-resolved { color: #0e5446; background: #dcf3e8; }
+.pill-closed { color: #5b6d66; background: #e9eeeb; }
+.ticket-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin: 14px 0 0; padding: 0; list-style: none; }
+.pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+.pager .small-button { margin-top: 0; }
+.pager .note { margin: 0; }
+.detail-title { margin: 0; font-size: 1.25rem; overflow-wrap: anywhere; }
+.ticket-text { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+.message-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.message { padding: 12px 14px; border: 1px solid #dce5df; border-radius: 10px; background: #f8fbf8; }
+.message-admin { border-color: #c9dcea; background: #eef6fb; }
+.message-meta { color: #63736e; font-size: .8rem; font-weight: 700; }
+#reply-form { margin-top: 14px; }
+textarea { resize: vertical; }
 .list-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .list-toolbar .status { margin: 0; }
 .small-button { margin-top: 10px; padding: 8px 12px; font-size: .88rem; }

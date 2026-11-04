@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StayHub — Support Center</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/auth.js" defer></script>
+  <script src="/api.js" defer></script>
+  <script src="/support.js" defer></script>
+</head>
+<body data-app-id="app3">
+  <div class="page-shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">S</span> StayHub Support</div>
+      <span class="origin-tag">Support Center · localhost:3002</span>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="page-title">
+        <div>
+          <span class="eyebrow">Support Center</span>
+          <h1 id="page-title">Hỗ trợ trước và sau khi đặt phòng.</h1>
+          <p>Gửi yêu cầu, gắn với booking của bạn và trao đổi với bộ phận hỗ trợ. Đã đăng nhập ở ứng dụng khác thì không cần nhập lại mật khẩu.</p>
+        </div>
+        <div class="login-card">
+          <h2>Phiên đăng nhập</h2>
+          <p>Đăng nhập qua IAM của StayHub. JWT chỉ được giữ trong bộ nhớ của trang.</p>
+          <button id="login-button" type="button" disabled>Login with Google</button>
+          <p id="login-status" role="status">Chưa đăng nhập.</p>
+        </div>
+      </section>
+
+      <div class="account-strip" aria-label="Thông tin phiên">
+        <div class="account-item"><span>Người dùng</span><strong id="user-email">Chưa đăng nhập</strong></div>
+        <div class="account-item"><span>Role từ JWT</span><strong id="user-role">Chưa xác định</strong></div>
+        <div class="account-item"><span>Tenant từ JWT</span><strong id="user-tenant">Chưa xác định</strong></div>
+      </div>
+      <p class="status" id="integration-status">Ticket cần JWT.</p>
+
+      <section id="create-panel" class="section" aria-labelledby="create-title" hidden>
+        <div class="section-heading">
+          <div><span class="eyebrow">Yêu cầu mới</span><h2 id="create-title">Tạo ticket</h2></div>
+          <p>Có thể gắn với một booking của bạn hoặc để trống nếu là câu hỏi chung.</p>
+        </div>
+        <div class="panel">
+          <form id="create-form" novalidate>
+            <div class="form-grid">
+              <label class="field full" for="ticket-booking">Booking liên quan<select id="ticket-booking"><option value="">Không gắn booking</option></select></label>
+              <label class="field full" for="ticket-subject">Tiêu đề<input id="ticket-subject" type="text" maxlength="200" autocomplete="off"></label>
+              <label class="field full" for="ticket-description">Nội dung<textarea id="ticket-description" rows="4" maxlength="4000"></textarea></label>
+            </div>
+            <button id="create-submit" class="action-button" type="submit">Gửi yêu cầu</button>
+          </form>
+          <p id="create-status" class="feedback" role="status"></p>
+          <p id="bookings-note" class="note" role="status"></p>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="tickets-title">
+        <div class="section-heading">
+          <div><span class="eyebrow">Ticket</span><h2 id="tickets-title">Ticket</h2></div>
+          <p id="tickets-note">Đăng nhập để xem ticket.</p>
+        </div>
+        <div class="list-toolbar">
+          <p id="tickets-status" class="status" role="status">Đăng nhập để xem ticket.</p>
+          <button id="tickets-reload" class="action-button small-button ghost-button" type="button" disabled>Tải lại</button>
+        </div>
+        <ul id="ticket-list" class="ticket-list" aria-label="Danh sách ticket"></ul>
+        <div class="pager">
+          <button id="prev-page" class="action-button small-button ghost-button" type="button" disabled>Trang trước</button>
+          <span id="page-info" class="note"></span>
+          <button id="next-page" class="action-button small-button ghost-button" type="button" disabled>Trang sau</button>
+        </div>
+      </section>
+
+      <section id="ticket-detail" class="section" aria-labelledby="detail-title" hidden>
+        <div class="panel">
+          <div class="card-head">
+            <h2 id="detail-title" class="detail-title"></h2>
+            <span id="detail-status-pill" class="pill"></span>
+          </div>
+          <p id="detail-meta" class="note"></p>
+          <p id="detail-description" class="ticket-text"></p>
+
+          <h3>Trao đổi</h3>
+          <ul id="message-list" class="message-list" aria-label="Tin nhắn"></ul>
+          <p id="detail-status" class="feedback" role="status"></p>
+
+          <form id="reply-form" novalidate>
+            <label class="field" for="reply-body">Trả lời<textarea id="reply-body" rows="3" maxlength="4000"></textarea></label>
+            <button id="reply-submit" class="action-button" type="submit">Gửi trả lời</button>
+          </form>
+          <p id="reply-status" class="feedback" role="status"></p>
+
+          <div id="status-actions" class="card-actions" hidden>
+            <button id="status-button" class="action-button secondary-button" type="button"></button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer-note">StayHub demo · Claims ở frontend chỉ phục vụ hiển thị; backend xác minh quyền và quyết định kết quả. Tin nhắn đã gửi không sửa hoặc xoá được.</footer>
+  </div>
+</body>
+</html>

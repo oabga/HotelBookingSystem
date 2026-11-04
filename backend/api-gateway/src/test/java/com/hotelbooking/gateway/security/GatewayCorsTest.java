@@ -12,13 +12,14 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 class GatewayCorsTest {
     private static final String APP_1 = "http://localhost:3000";
     private static final String APP_2 = "http://localhost:3001";
+    private static final String SUPPORT_CENTER = "http://localhost:3002";
 
     @Autowired
     WebTestClient client;
 
     @Test
     void unauthorizedResponseIsReadableByAllowedOrigins() {
-        for (String origin : new String[] {APP_1, APP_2}) {
+        for (String origin : new String[] {APP_1, APP_2, SUPPORT_CENTER}) {
             client.get().uri("/api/hotels")
                     .header(HttpHeaders.ORIGIN, origin)
                     .exchange()
@@ -49,12 +50,12 @@ class GatewayCorsTest {
     @Test
     void preflightAllowsPatchForSupportStatus() {
         client.method(HttpMethod.OPTIONS).uri("/api/support/tickets/1/status")
-                .header(HttpHeaders.ORIGIN, APP_1)
+                .header(HttpHeaders.ORIGIN, SUPPORT_CENTER)
                 .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "PATCH")
                 .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "authorization,content-type")
                 .exchange()
                 .expectStatus().isOk()
-                .expectHeader().valueEquals(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, APP_1);
+                .expectHeader().valueEquals(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, SUPPORT_CENTER);
     }
 
     @Test

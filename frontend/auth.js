@@ -29,7 +29,7 @@
 
   function initAuth(win, doc) {
     const appId = doc.body.dataset.appId;
-    if (appId !== "app1" && appId !== "app2") throw new Error("Unknown app");
+    if (!["app1", "app2", "app3"].includes(appId)) throw new Error("Unknown app");
 
     const loginButton = doc.getElementById("login-button");
     const loginStatus = doc.getElementById("login-status");
@@ -59,7 +59,7 @@
         doc.getElementById("user-role").textContent = claims.role;
         doc.getElementById("user-tenant").textContent = String(claims.tenant_id);
         loginStatus.textContent = "Đã nhận JWT; claims chỉ để hiển thị, frontend chưa xác minh chữ ký.";
-        integrationStatus.textContent = "JWT trong memory; Hotels, Booking và ADMIN gọi qua Gateway.";
+        integrationStatus.textContent = "JWT trong memory; mọi API đều gọi qua Gateway.";
       } catch (_error) {
         loginStatus.textContent = "Token callback không hợp lệ. Hãy đăng nhập lại.";
       }

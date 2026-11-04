@@ -93,6 +93,49 @@
     && isMoney(value.totalAmount) && bookingStatuses.includes(value.status)
     && isUtcTime(value.paymentExpiresAt) && isUtcTime(value.createdAt);
 
+  const ticketStatuses = ["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"];
+
+  const isTicket = (value, tenantId) => Boolean(value) && isPositiveId(value.id) && value.tenantId === tenantId
+    && (value.bookingId === null || isPositiveId(value.bookingId)) && isText(value.requesterEmail)
+    && isText(value.subject) && isText(value.description) && ticketStatuses.includes(value.status)
+    && isUtcTime(value.createdAt) && isUtcTime(value.updatedAt)
+    && (value.closedAt === null || isUtcTime(value.closedAt));
+
+  const isMessage = value => Boolean(value) && isPositiveId(value.id) && isPositiveId(value.ticketId)
+    && isPositiveId(value.authorUserId) && ["USER", "ADMIN"].includes(value.authorRole)
+    && isText(value.body) && isUtcTime(value.createdAt);
+
+  const isTicketDetail = (value, tenantId) => isTicket(value, tenantId) && Array.isArray(value.messages)
+    && value.messages.every(message => isMessage(message) && message.ticketId === value.id);
+
+  const isTicketPage = value => Boolean(value) && Array.isArray(value.items)
+    && isCount(value.page) && isPositiveId(value.size) && isCount(value.totalElements) && isCount(value.totalPages);
+
+  // Khớp quy tắc của support-service để báo lỗi rõ hơn; backend vẫn là nơi quyết định.
+  function textProblem(text) {
+    if (/<\s*[a-zA-Z/!?]/.test(text)) return "Nội dung không được chứa thẻ HTML.";
+    if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/.test(text)) return "Nội dung có ký tự không hợp lệ.";
+    return null;
+  }
+
+  function validateNewTicket(subject, description) {
+    const title = String(subject).trim();
+    const content = String(description).trim();
+    if (!title) return "Nhập tiêu đề.";
+    if (title.length > 200) return "Tiêu đề không được quá 200 ký tự.";
+    if (/[\r\n]/.test(title)) return "Tiêu đề chỉ được có một dòng.";
+    if (!content) return "Nhập nội dung.";
+    if (content.length > 4000) return "Nội dung không được quá 4000 ký tự.";
+    return textProblem(title) || textProblem(content);
+  }
+
+  function validateMessage(body) {
+    const text = String(body).trim();
+    if (!text) return "Nhập nội dung trả lời.";
+    if (text.length > 4000) return "Nội dung không được quá 4000 ký tự.";
+    return textProblem(text);
+  }
+
   function createClient({ fetchFn, auth, onUnauthorized }) {
     async function send(method, path, body) {
       const authorization = auth.bearerHeaders().Authorization;
@@ -120,7 +163,8 @@
     return Object.freeze({
       get: path => send("GET", path),
       post: (path, body) => send("POST", path, body),
-      put: (path, body) => send("PUT", path, body)
+      put: (path, body) => send("PUT", path, body),
+      patch: (path, body) => send("PATCH", path, body)
     });
   }
 
@@ -150,6 +194,7 @@
   const api = Object.freeze({
     createClient, describeFailure, validateStay, validatePrice, validateNewRoomType, validateIntegerInRange,
     todayInVietnam, isHotel, isAvailability, isRoomType, isInventoryRow, isBooking,
+    isTicket, isMessage, isTicketDetail, isTicketPage, validateNewTicket, validateMessage,
     formatMoney, formatTime, element, sessionExpired
   });
 

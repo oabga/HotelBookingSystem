@@ -2,12 +2,12 @@ const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 
-for (const [port, app] of [[3000, "app1"], [3001, "app2"]]) {
+for (const [port, app] of [[3000, "app1"], [3001, "app2"], [3002, "app3"]]) {
   http.createServer((request, response) => {
     const pathname = new URL(request.url, "http://localhost").pathname;
     const file = pathname === "/" || pathname === "/callback/"
       ? path.join(__dirname, app, "index.html")
-      : ["/auth.js", "/api.js", "/bookings.js", "/catalog.js", "/admin.js", "/app.js", "/styles.css"].includes(pathname)
+      : ["/auth.js", "/api.js", "/bookings.js", "/catalog.js", "/admin.js", "/app.js", "/support.js", "/styles.css"].includes(pathname)
         ? path.join(__dirname, pathname.slice(1))
         : null;
 

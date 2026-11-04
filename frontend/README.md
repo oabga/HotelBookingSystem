@@ -1,6 +1,6 @@
 # StayHub frontend demo
 
-App 1 và App 2 là hai trang HTML/JavaScript thuần ở hai origin, gọi backend theo API Contract bản 3.0. Bản này đã bị xoá khỏi `main`; xem lại bằng `git show 45d964e^:backend/docs/original/api-contract.md`. Giao diện theo role trong JWT, không theo số ứng dụng. Frontend không xác minh chữ ký JWT và không tự chứng minh Google SSO.
+App 1, App 2 và Support Center là các trang HTML/JavaScript thuần ở ba origin. App 1 và App 2 gọi backend theo API Contract bản 3.0. Bản này đã bị xoá khỏi `main`; xem lại bằng `git show 45d964e^:backend/docs/original/api-contract.md`. Giao diện theo role trong JWT, không theo số ứng dụng. Frontend không xác minh chữ ký JWT và không tự chứng minh Google SSO.
 
 ## Chạy hai trang
 
@@ -10,7 +10,7 @@ Cần Node.js. Từ thư mục gốc repository, chạy:
 node frontend/server.js
 ```
 
-Mở `http://localhost:3000/` (App 1) và `http://localhost:3001/` (App 2). Server cũng phục vụ cùng giao diện tại `/callback/` của mỗi origin. Dừng bằng `Ctrl+C`.
+Mở `http://localhost:3000/` (App 1), `http://localhost:3001/` (App 2) và `http://localhost:3002/` (Support Center). Server cũng phục vụ cùng giao diện tại `/callback/` của mỗi origin. Dừng bằng `Ctrl+C`.
 
 ## Hành vi hiện có
 
@@ -20,6 +20,8 @@ Mở `http://localhost:3000/` (App 1) và `http://localhost:3001/` (App 2). Serv
 - **Booking:** USER xem đơn của mình, thanh toán mô phỏng và huỷ đơn `PENDING_PAYMENT`. ADMIN xem mọi đơn trong tenant nhưng không có nút thao tác.
 - **ADMIN:** xem tồn kho theo đêm, thêm loại phòng và sửa giá cho khách sạn đang chọn. Danh sách loại phòng để sửa giá lấy từ tồn kho đã tải, vì contract không có API liệt kê loại phòng.
 - **Lỗi:** giao diện chỉ dựa vào HTTP status, không đọc `detail`. 401 ở bất kỳ API nào sẽ báo đăng nhập lại. Khi mất kết nối lúc ghi, giao diện báo chưa rõ kết quả thay vì coi là thất bại.
+
+- **Support Center (`:3002`):** ứng dụng riêng, đăng nhập qua cùng IAM nên có phiên rồi thì không phải nhập lại mật khẩu. USER tạo ticket, có thể gắn booking của mình, và trả lời ticket của mình. ADMIN xem ticket trong tenant, trả lời và đổi trạng thái theo đúng bước kế tiếp. Xem API ở `backend/support-service/README.md`.
 
 ## Kiểm tra local
 
