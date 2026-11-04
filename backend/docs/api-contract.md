@@ -109,7 +109,7 @@ Tất cả business API yêu cầu JWT hợp lệ; ngoài lỗi được liệt 
 | IAM redirect **về App 2** | `http://localhost:3001/callback/#token=<jwt>` | HTTP 302, token trong **URL fragment** |
 | Khóa xác minh công khai | `GET http://localhost:8084/.well-known/jwks.json` | 200 JSON JWKS |
 
-**Quy tắc serve static:** D tạo đường dẫn `frontend-demo/app1/callback/index.html` và `frontend-demo/app2/callback/index.html` **hoặc** cấu hình HTTP static server thực sự phục vụ `/callback/` bằng chính HTML/JS của mỗi app. **Không dùng `/callback` tùy tiện nếu server trả 404**. Chuẩn `/callback/` (có slash cuối) trong bảng trên là địa chỉ chính thức của bản contract này; không thay bằng `/` nếu chưa cập nhật contract và thông báo A/D.
+**Quy tắc serve static:** D tạo đường dẫn `frontend/app1/callback/index.html` và `frontend/app2/callback/index.html` **hoặc** cấu hình HTTP static server thực sự phục vụ `/callback/` bằng chính HTML/JS của mỗi app. **Không dùng `/callback` tùy tiện nếu server trả 404**. Chuẩn `/callback/` (có slash cuối) trong bảng trên là địa chỉ chính thức của bản contract này; không thay bằng `/` nếu chưa cập nhật contract và thông báo A/D.
 
 - Chỉ cho phép `app=app1` hoặc `app=app2`; thiếu/sai `app` → **400**, không redirect đến URL tùy ý. IAM **không nhận `redirect_uri` từ người dùng** để chuyển hướng tuỳ ý. Lưu `app` đã kiểm tra cùng OAuth `state`/server session, khôi phục sau Google callback.
 - Browser bắt đầu login bằng điều hướng trang (`window.location.assign`), **không** `fetch` sang `/auth/start`.

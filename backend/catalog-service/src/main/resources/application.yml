@@ -1,9 +1,16 @@
 server:
   port: 8081
 
+security:
+  jwt:
+    issuer: http://localhost:8084
+
 spring:
   application:
     name: catalog-service
+  mvc:
+    problemdetails:
+      enabled: true
   datasource:
     url: jdbc:postgresql://localhost:5432/hotelbooking
     username: hotelbooking

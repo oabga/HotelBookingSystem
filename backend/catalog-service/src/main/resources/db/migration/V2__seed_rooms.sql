@@ -1,13 +1,25 @@
--- tenant_id phải khớp tenant.id (bảng do iam-service tạo, cùng database "hotelbooking"):
--- 1 = Tenant 1 - Demo Hotel A, 2 = Tenant 2 - Demo Hotel B
--- (xem docs/erd-v2.md mục 5 — chỉ đúng khi migrate trên DB mới tạo sạch).
-INSERT INTO room (tenant_id, name, price) VALUES
-    (1, 'Standard Room 101', 500000),
-    (1, 'Deluxe Room 102', 900000),
-    (2, 'Standard Room 201', 450000),
-    (2, 'Deluxe Room 202', 850000);
+-- ID contract: hotel 1/2/3; room_type 1..6.
+INSERT INTO hotel (tenant_id, name, address)
+VALUES (1, 'Demo Hotel A - Hà Nội', '12 Hàng Trống, Hoàn Kiếm, Hà Nội');
+INSERT INTO hotel (tenant_id, name, address)
+VALUES (2, 'Demo Hotel B - TP.HCM', '25 Nguyễn Huệ, Quận 1, TP.HCM');
+INSERT INTO hotel (tenant_id, name, address)
+VALUES (1, 'Demo Hotel A - Đà Nẵng', '08 Bạch Đằng, Hải Châu, Đà Nẵng');
 
--- Phòng riêng dành cho test tranh chỗ cùng khoảng thời gian (race condition) — không dùng ở
--- các test khác để tránh nhiễu kết quả.
-INSERT INTO room (tenant_id, name, price) VALUES
-    (1, 'Race-Test Room 199', 500000);
+INSERT INTO room_type (tenant_id, hotel_id, name, capacity, base_price, total_rooms)
+VALUES (1, 1, 'Standard', 2, 500000, 3);
+INSERT INTO room_type (tenant_id, hotel_id, name, capacity, base_price, total_rooms)
+VALUES (1, 1, 'Deluxe', 2, 900000, 4);
+INSERT INTO room_type (tenant_id, hotel_id, name, capacity, base_price, total_rooms)
+VALUES (2, 2, 'Standard', 2, 450000, 5);
+INSERT INTO room_type (tenant_id, hotel_id, name, capacity, base_price, total_rooms)
+VALUES (2, 2, 'Deluxe', 2, 850000, 6);
+INSERT INTO room_type (tenant_id, hotel_id, name, capacity, base_price, total_rooms)
+VALUES (1, 3, 'Race Test', 2, 500000, 1);
+INSERT INTO room_type (tenant_id, hotel_id, name, capacity, base_price, total_rooms)
+VALUES (1, 3, 'Standard', 2, 600000, 5);
+
+INSERT INTO room_inventory (tenant_id, room_type_id, stay_date, total)
+SELECT rt.tenant_id, rt.id, d::date, rt.total_rooms
+FROM room_type rt
+CROSS JOIN generate_series(DATE '2026-11-01', DATE '2027-01-31', INTERVAL '1 day') AS d;

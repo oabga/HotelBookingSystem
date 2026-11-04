@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Catalog API Quick Check</title>
+  <style>
+    :root { color-scheme: light; --ink:#182230; --muted:#667085; --line:#d9e0e8; --blue:#175cd3; --pale:#eff8ff; --green:#067647; --red:#b42318; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:#f5f7fa; color:var(--ink); font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif; }
+    main { max-width:1120px; margin:32px auto; padding:0 18px 48px; }
+    h1 { margin:0 0 8px; font-size:30px; }
+    h2 { margin:0 0 14px; font-size:19px; }
+    p { margin:6px 0 12px; }
+    .muted { color:var(--muted); }
+    .notice { padding:14px 16px; border:1px solid #b2ddff; border-radius:10px; background:var(--pale); margin:18px 0; }
+    .notice strong { color:#1849a9; }
+    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+    section { background:#fff; border:1px solid var(--line); border-radius:12px; padding:18px; box-shadow:0 1px 2px #1018280d; }
+    .wide { grid-column:1/-1; }
+    label { display:block; margin:9px 0 4px; font-weight:600; font-size:13px; }
+    input,select,textarea { width:100%; border:1px solid #cbd5e1; border-radius:7px; padding:9px 10px; color:var(--ink); background:#fff; font:inherit; }
+    textarea { min-height:75px; resize:vertical; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+    button { border:0; border-radius:7px; padding:9px 13px; color:#fff; background:var(--blue); font:inherit; font-size:14px; font-weight:600; cursor:pointer; }
+    button.secondary { background:#344054; }
+    button:hover { filter:brightness(.94); }
+    .row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+    .check { display:flex; align-items:center; gap:8px; font-size:13px; }
+    .check input { width:auto; }
+    pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:340px; overflow:auto; padding:13px; border-radius:8px; background:#101828; color:#e4e7ec; font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
+    #tokenState { font-weight:600; }
+    #tokenState.ok { color:var(--green); }
+    #tokenState.bad { color:var(--red); }
+    .result-head { display:flex; justify-content:space-between; gap:12px; align-items:center; }
+    .status { font-weight:700; }
+    .status.ok { color:var(--green); }
+    .status.bad { color:var(--red); }
+    @media (max-width:760px) { .grid { grid-template-columns:1fr; } .wide { grid-column:auto; } main { margin-top:20px; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Catalog API Quick Check</h1>
+  <p class="muted">Kiểm tra nhanh 5 API của Catalog trực tiếp qua cổng 8081.</p>
+  <div class="notice"><strong>Chế độ local giả lập:</strong> Token được ký tạm trong bộ nhớ bằng RSA của dev harness để thử JWT/role/tenant của Catalog. Đây không phải IAM, Google SSO hay Gateway. Không dùng token này ngoài máy local. Token không được lưu vào localStorage.</div>
+
+  <div class="grid">
+    <section class="wide">
+      <h2>1. Tạo token thử nghiệm</h2>
+      <div class="row">
+        <div><label for="role">Role</label><select id="role"><option>USER</option><option>ADMIN</option></select></div>
+        <div><label for="tenant">Tenant</label><select id="tenant"><option value="1">Tenant 1</option><option value="2">Tenant 2</option></select></div>
+      </div>
+      <div class="actions"><button id="makeToken">Tạo token local</button><button class="secondary" id="clearToken">Xóa token</button></div>
+      <p id="tokenState" class="bad">Chưa có token. Tạo USER để thử đọc; ADMIN để thử API quản trị.</p>
+      <label for="tokenPreview">Token trong phiên hiện tại</label>
+      <textarea id="tokenPreview" readonly placeholder="Token chỉ tồn tại trong bộ nhớ của trang này"></textarea>
+    </section>
+
+    <section>
+      <h2>2. Danh sách khách sạn</h2>
+      <p class="muted">USER/ADMIN chỉ thấy khách sạn thuộc tenant trong token.</p>
+      <button data-call="hotels">GET /hotels</button>
+    </section>
+
+    <section>
+      <h2>3. Tìm phòng trống</h2>
+      <label for="availabilityHotel">Hotel ID</label><input id="availabilityHotel" type="number" value="1" min="1">
+      <div class="row">
+        <div><label for="checkIn">Check-in</label><input id="checkIn" type="date" value="2026-11-24"></div>
+        <div><label for="checkOut">Check-out</label><input id="checkOut" type="date" value="2026-11-26"></div>
+      </div>
+      <div class="actions"><button id="searchAvailability">GET availability</button></div>
+    </section>
+
+    <section>
+      <h2>4. Thêm loại phòng (ADMIN)</h2>
+      <label for="createHotel">Hotel ID</label><input id="createHotel" type="number" value="1" min="1">
+      <div class="row">
+        <div><label for="roomName">Tên</label><input id="roomName" value="Suite Quick Test" maxlength="100"></div>
+        <div><label for="capacity">Sức chứa</label><input id="capacity" type="number" value="4" min="1" max="20"></div>
+      </div>
+      <div class="row">
+        <div><label for="basePrice">Giá/đêm</label><input id="basePrice" type="number" value="2500000" min="0.01" step="0.01"></div>
+        <div><label for="totalRooms">Số phòng</label><input id="totalRooms" type="number" value="2" min="1" max="1000"></div>
+      </div>
+      <label class="check"><input id="fakeTenant" type="checkbox"> Gửi thêm `tenantId: 999` để kiểm tra server bỏ qua field lạ</label>
+      <div class="actions"><button id="createRoomType">POST room-types</button></div>
+    </section>
+
+    <section>
+      <h2>5. Sửa giá (ADMIN)</h2>
+      <label for="priceRoomType">Room type ID</label><input id="priceRoomType" type="number" value="1" min="1">
+      <label for="newPrice">Giá mới</label><input id="newPrice" type="number" value="600000" min="0.01" step="0.01">
+      <div class="actions"><button id="updatePrice">PUT price</button></div>
+    </section>
+
+    <section>
+      <h2>6. Inventory quản trị (ADMIN)</h2>
+      <label for="inventoryHotel">Hotel ID</label><input id="inventoryHotel" type="number" value="1" min="1">
+      <div class="row">
+        <div><label for="inventoryIn">Check-in</label><input id="inventoryIn" type="date" value="2026-11-24"></div>
+        <div><label for="inventoryOut">Check-out</label><input id="inventoryOut" type="date" value="2026-11-26"></div>
+      </div>
+      <div class="actions"><button id="getInventory">GET inventory</button></div>
+    </section>
+
+    <section class="wide">
+      <div class="result-head"><h2>Kết quả request gần nhất</h2><span id="lastStatus" class="status muted">Chưa gửi request</span></div>
+      <pre id="result">Response sẽ hiện ở đây.</pre>
+    </section>
+  </div>
+</main>
+<script>
+  let accessToken = '';
+  const $ = (id) => document.getElementById(id);
+  const output = $('result');
+
+  function showResult(label, status, body) {
+    $('lastStatus').textContent = `${label} · HTTP ${status}`;
+    $('lastStatus').className = `status ${status >= 200 && status < 300 ? 'ok' : 'bad'}`;
+    output.textContent = typeof body === 'string' ? body : JSON.stringify(body, null, 2);
+  }
+
+  async function callApi(path, method = 'GET', body) {
+    if (!accessToken) {
+      showResult(`${method} ${path}`, 0, 'Hãy tạo token local trước.');
+      return;
+    }
+    const headers = { Authorization: `Bearer ${accessToken}` };
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    try {
+      const response = await fetch(`/api${path}`, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      const text = await response.text();
+      let value = text;
+      try { value = text ? JSON.parse(text) : '(empty response)'; } catch {}
+      showResult(`${method} ${path}`, response.status, value);
+    } catch (error) {
+      showResult(`${method} ${path}`, 0, `Không kết nối được dev harness/Catalog: ${error.message}`);
+    }
+  }
+
+  $('makeToken').addEventListener('click', async () => {
+    const response = await fetch('/dev/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: $('role').value, tenantId: Number($('tenant').value) }),
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      showResult('POST /dev/token', response.status, result);
+      return;
+    }
+    accessToken = result.accessToken;
+    $('tokenPreview').value = accessToken;
+    $('tokenState').textContent = `Token tạm đã tạo · ${$('role').value} · tenant ${$('tenant').value} · hết hạn sau 60 phút`;
+    $('tokenState').className = 'ok';
+    showResult('POST /dev/token', response.status, { issuer: result.issuer, expiresIn: result.expiresIn, note: 'JWT không hiển thị lại trong response log.' });
+  });
+
+  $('clearToken').addEventListener('click', () => {
+    accessToken = '';
+    $('tokenPreview').value = '';
+    $('tokenState').textContent = 'Đã xóa token khỏi bộ nhớ trang.';
+    $('tokenState').className = 'bad';
+  });
+
+  document.querySelector('[data-call="hotels"]').addEventListener('click', () => callApi('/hotels'));
+  $('searchAvailability').addEventListener('click', () => {
+    const query = new URLSearchParams({ checkIn: $('checkIn').value, checkOut: $('checkOut').value });
+    callApi(`/hotels/${encodeURIComponent($('availabilityHotel').value)}/availability?${query}`);
+  });
+  $('createRoomType').addEventListener('click', () => {
+    const body = {
+      name: $('roomName').value,
+      capacity: Number($('capacity').value),
+      basePrice: Number($('basePrice').value),
+      totalRooms: Number($('totalRooms').value),
+    };
+    if ($('fakeTenant').checked) body.tenantId = 999;
+    callApi(`/hotels/${encodeURIComponent($('createHotel').value)}/room-types`, 'POST', body);
+  });
+  $('updatePrice').addEventListener('click', () => callApi(
+    `/room-types/${encodeURIComponent($('priceRoomType').value)}/price`, 'PUT',
+    { basePrice: Number($('newPrice').value) },
+  ));
+  $('getInventory').addEventListener('click', () => {
+    const query = new URLSearchParams({ checkIn: $('inventoryIn').value, checkOut: $('inventoryOut').value });
+    callApi(`/admin/hotels/${encodeURIComponent($('inventoryHotel').value)}/inventory?${query}`);
+  });
+</script>
+</body>
+</html>

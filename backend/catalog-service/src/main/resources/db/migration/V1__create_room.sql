@@ -1,18 +1,42 @@
--- Yêu cầu bảng "tenant" đã tồn tại (migration V1 của iam-service phải chạy trước
--- trên database chung "hotelbooking" — xem docs/iam-google-sso-demo-plan-v2.md §4.1).
---
--- Không còn cờ "available" — phòng đặt được theo KHOẢNG THỜI GIAN (check_in/check_out ở
--- bảng booking), không phải trạng thái on/off tĩnh. "Còn trống" = không có booking nào
--- đè giờ trong khoảng khách muốn đặt (xem docs/erd-v2.md).
-CREATE TABLE room (
+-- Tên file được giữ nguyên vì BookingFlowIntegrationTest tham chiếu trực tiếp đường dẫn này.
+-- Catalog schema v3: IAM phải chạy trước để tạo tenant.
+
+CREATE TABLE hotel (
     id        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    tenant_id BIGINT NOT NULL REFERENCES tenant (id),
+    tenant_id BIGINT       NOT NULL REFERENCES tenant (id),
     name      VARCHAR(100) NOT NULL,
-    price     NUMERIC(10, 2) NOT NULL,
-    CONSTRAINT chk_room_price_positive CHECK (price > 0),
-    -- Composite unique để booking.(tenant_id, room_id) có thể FK ghép xuống đây,
-    -- chặn booking trỏ vào room thuộc tenant khác (xem docs/erd-v2.md mục 3).
-    CONSTRAINT uq_room_tenant_id UNIQUE (tenant_id, id)
+    address   VARCHAR(255) NOT NULL,
+    CONSTRAINT uq_hotel_tenant_id UNIQUE (tenant_id, id)
 );
 
-CREATE INDEX idx_room_tenant_id ON room (tenant_id);
+CREATE TABLE room_type (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    tenant_id   BIGINT         NOT NULL,
+    hotel_id    BIGINT         NOT NULL,
+    name        VARCHAR(100)   NOT NULL,
+    capacity    INT            NOT NULL,
+    base_price  NUMERIC(10, 2) NOT NULL,
+    total_rooms INT            NOT NULL,
+    CONSTRAINT uq_room_type_tenant_id UNIQUE (tenant_id, id),
+    CONSTRAINT fk_room_type_hotel_same_tenant
+        FOREIGN KEY (tenant_id, hotel_id) REFERENCES hotel (tenant_id, id),
+    CONSTRAINT chk_room_type_capacity CHECK (capacity > 0),
+    CONSTRAINT chk_room_type_price CHECK (base_price > 0),
+    CONSTRAINT chk_room_type_total_rooms CHECK (total_rooms >= 0)
+);
+
+CREATE TABLE room_inventory (
+    tenant_id    BIGINT NOT NULL,
+    room_type_id BIGINT NOT NULL,
+    stay_date    DATE   NOT NULL,
+    total        INT    NOT NULL,
+    sold         INT    NOT NULL DEFAULT 0,
+    PRIMARY KEY (tenant_id, room_type_id, stay_date),
+    CONSTRAINT fk_inventory_room_type_same_tenant
+        FOREIGN KEY (tenant_id, room_type_id) REFERENCES room_type (tenant_id, id),
+    CONSTRAINT chk_inventory_not_oversold CHECK (sold >= 0 AND sold <= total)
+);
+
+CREATE INDEX idx_hotel_tenant_id ON hotel (tenant_id);
+CREATE INDEX idx_room_type_tenant_hotel ON room_type (tenant_id, hotel_id, id);
+CREATE INDEX idx_inventory_tenant_date ON room_inventory (tenant_id, stay_date);
