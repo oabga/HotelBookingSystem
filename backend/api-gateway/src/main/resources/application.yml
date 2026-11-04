@@ -1,6 +1,10 @@
 server:
   port: 8080
 
+security:
+  jwt:
+    issuer: http://localhost:8084
+
 spring:
   application:
     name: api-gateway
@@ -14,19 +18,45 @@ spring:
           jwk-set-uri: http://localhost:8084/.well-known/jwks.json
   cloud:
     gateway:
+      # Theo docs/api-contract.md §6 (bản 3.0): 4 route cố định. Không có route /dev/** hay
+      # /auth/**; IAM được gọi trực tiếp :8084, không qua Gateway.
       routes:
-        # Theo API contract đã chốt ở docs/iam-google-sso-demo-plan-v2.md §4.2:
-        # /api/rooms/** -> /rooms/** (catalog-service), /api/bookings/** -> /bookings/** (booking-service).
-        # Login/callback/JWKS gọi trực tiếp iam-service :8084, không qua gateway.
-        - id: catalog-service
+        - id: hotels
           uri: http://localhost:8081
           predicates:
-            - Path=/api/rooms/**
+            - Path=/api/hotels/**
           filters:
             - StripPrefix=1
-        - id: booking-service
+        - id: room-types
+          uri: http://localhost:8081
+          predicates:
+            - Path=/api/room-types/**
+          filters:
+            - StripPrefix=1
+        - id: admin
+          uri: http://localhost:8081
+          predicates:
+            - Path=/api/admin/**
+          filters:
+            - StripPrefix=1
+        - id: bookings
           uri: http://localhost:8082
           predicates:
             - Path=/api/bookings/**
           filters:
             - StripPrefix=1
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins:
+              - http://localhost:3000
+              - http://localhost:3001
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - OPTIONS
+            allowedHeaders:
+              - Authorization
+              - Content-Type
+            allowCredentials: false

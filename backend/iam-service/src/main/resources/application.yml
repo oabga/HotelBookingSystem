@@ -32,3 +32,16 @@ spring:
               - openid
               - email
               - profile
+
+security:
+  jwt:
+    # Claim "iss" phát ra trong JWT nội bộ; Gateway/Catalog/Booking phải khớp đúng chuỗi này.
+    issuer: http://localhost:8084
+    ttl-minutes: 15
+
+# Allowlist app -> callback frontend. "app" ngoài danh sách này bị chặn ở /auth/start (400),
+# không redirect tuỳ ý (docs/api-contract.md §3.1).
+sso:
+  callbacks:
+    app1: http://localhost:3000/callback/
+    app2: http://localhost:3001/callback/
