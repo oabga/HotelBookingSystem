@@ -1,12 +1,12 @@
 # StayHub frontend demo
 
-App 1 và App 2 là hai trang HTML/JavaScript thuần ở hai origin, gọi backend theo `backend/docs/api-contract.md` bản 3.0. Giao diện theo role trong JWT, không theo số ứng dụng. Frontend không xác minh chữ ký JWT và không tự chứng minh Google SSO.
+App 1 và App 2 là hai trang HTML/JavaScript thuần ở hai origin, gọi backend theo API Contract bản 3.0. Bản này đã bị xoá khỏi `main`; xem lại bằng `git show 45d964e^:backend/docs/original/api-contract.md`. Giao diện theo role trong JWT, không theo số ứng dụng. Frontend không xác minh chữ ký JWT và không tự chứng minh Google SSO.
 
 ## Chạy hai trang
 
 Cần Node.js. Từ thư mục gốc repository, chạy:
 
-```powershell
+```bash
 node frontend/server.js
 ```
 
@@ -23,7 +23,7 @@ Mở `http://localhost:3000/` (App 1) và `http://localhost:3001/` (App 2). Serv
 
 ## Kiểm tra local
 
-```powershell
+```bash
 node --test frontend/*.test.js
 ```
 
