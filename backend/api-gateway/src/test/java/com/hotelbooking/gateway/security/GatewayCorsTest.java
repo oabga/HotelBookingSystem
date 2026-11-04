@@ -47,6 +47,17 @@ class GatewayCorsTest {
     }
 
     @Test
+    void preflightAllowsPatchForSupportStatus() {
+        client.method(HttpMethod.OPTIONS).uri("/api/support/tickets/1/status")
+                .header(HttpHeaders.ORIGIN, APP_1)
+                .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "PATCH")
+                .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "authorization,content-type")
+                .exchange()
+                .expectStatus().isOk()
+                .expectHeader().valueEquals(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, APP_1);
+    }
+
+    @Test
     void preflightNeedsNoTokenAndRejectsOtherOrigins() {
         client.method(HttpMethod.OPTIONS).uri("/api/bookings")
                 .header(HttpHeaders.ORIGIN, APP_1)

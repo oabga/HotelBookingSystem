@@ -135,6 +135,28 @@ services:
       timeout: 3s
       retries: 40
 
+  # Chạy sau Booking vì support_ticket có FK sang booking: IAM -> Catalog -> Booking -> Support.
+  support-service:
+    profiles: [dev-test]
+    build:
+      context: .
+      args:
+        SERVICE: support-service
+    environment:
+      <<: *resource-server-env
+    ports:
+      - "127.0.0.1:8085:8085"
+    depends_on:
+      booking-service:
+        condition: service_healthy
+      dev-token:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8085"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+
 # Không còn service Keycloak — plan v2 dùng Google làm Identity Provider,
 # iam-service (tự code) là OAuth2 Client + tự mint/verify JWT nội bộ.
 

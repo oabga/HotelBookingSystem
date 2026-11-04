@@ -176,7 +176,7 @@ Khi reset demo phải đưa `sold` về 0 cùng lúc với xoá booking, nếu k
 
 ```sql
 BEGIN;
-TRUNCATE booking RESTART IDENTITY;
+TRUNCATE booking RESTART IDENTITY CASCADE;
 UPDATE room_inventory SET sold = 0;
 COMMIT;
 ```
