@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StayHub — Support Center</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/auth.js" defer></script>
+  <script src="/api.js" defer></script>
+  <script src="/support.js" defer></script>
+</head>
+<body data-app-id="app3">
+  <div class="page-shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">S</span> StayHub Support</div>
+      <span class="origin-tag">Support Center · localhost:3002</span>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="page-title">
+        <div>
+          <span class="eyebrow">Support Center</span>
+          <h1 id="page-title">Xin đổi ngày thuê phòng.</h1>
+          <p>Chọn đơn đã đặt và ngày muốn đổi, rồi gửi yêu cầu. Bạn sẽ nhận thông báo khi yêu cầu được duyệt hoặc từ chối. Đã đăng nhập ở ứng dụng khác thì không cần nhập lại mật khẩu.</p>
+        </div>
+        <div class="login-card">
+          <h2>Phiên đăng nhập</h2>
+          <p>Đăng nhập qua IAM của StayHub. JWT chỉ được giữ trong bộ nhớ của trang.</p>
+          <button id="login-button" type="button" disabled>Login with Google</button>
+          <p id="login-status" role="status">Chưa đăng nhập.</p>
+        </div>
+      </section>
+
+      <div class="account-strip" aria-label="Thông tin phiên">
+        <div class="account-item"><span>Người dùng</span><strong id="user-email">Chưa đăng nhập</strong></div>
+        <div class="account-item"><span>Role từ JWT</span><strong id="user-role">Chưa xác định</strong></div>
+        <div class="account-item"><span>Tenant từ JWT</span><strong id="user-tenant">Chưa xác định</strong></div>
+      </div>
+      <p class="status" id="integration-status">Yêu cầu đổi ngày cần JWT.</p>
+
+      <section id="notification-panel" class="section" aria-labelledby="notification-title" hidden>
+        <div class="section-heading">
+          <div><span class="eyebrow">Thông báo</span><h2 id="notification-title">Thông báo của tôi <span id="notification-count" class="pill pill-pending"></span></h2></div>
+          <p>Kết quả xử lý yêu cầu sẽ hiện ở đây, trang tự cập nhật sau mỗi 15 giây.</p>
+        </div>
+        <p id="notification-status" class="status" role="status"></p>
+        <ul id="notification-list" class="message-list" aria-label="Danh sách thông báo"></ul>
+      </section>
+
+      <section id="create-panel" class="section" aria-labelledby="create-title" hidden>
+        <div class="section-heading">
+          <div><span class="eyebrow">Yêu cầu mới</span><h2 id="create-title">Xin đổi ngày</h2></div>
+          <p>Chỉ đổi được đơn đã thanh toán và chưa tới ngày nhận phòng. Phòng chưa được giữ cho tới khi yêu cầu được duyệt.</p>
+        </div>
+        <div class="panel">
+          <form id="change-form" novalidate>
+            <div class="form-grid">
+              <label class="field full" for="change-booking">Loại phòng đã đặt<select id="change-booking"><option value="">Chọn đơn đã đặt</option></select></label>
+              <label class="field" for="change-check-in">Ngày nhận phòng mới<input id="change-check-in" type="date"></label>
+              <label class="field" for="change-check-out">Ngày trả phòng mới<input id="change-check-out" type="date"></label>
+            </div>
+            <button id="check-button" class="action-button secondary-button" type="button">Kiểm tra còn phòng</button>
+            <p id="quote-result" class="feedback" role="status"></p>
+            <div class="form-grid">
+              <label class="field full" for="change-description">Mô tả<textarea id="change-description" rows="3" maxlength="4000"></textarea></label>
+            </div>
+            <button id="change-submit" class="action-button" type="submit" disabled>Gửi yêu cầu</button>
+          </form>
+          <p id="change-status" class="feedback" role="status"></p>
+          <p id="bookings-note" class="note" role="status"></p>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="requests-title">
+        <div class="section-heading">
+          <div><span class="eyebrow">Phiếu yêu cầu</span><h2 id="requests-title">Phiếu yêu cầu</h2></div>
+          <p id="requests-note">Đăng nhập để xem phiếu yêu cầu.</p>
+        </div>
+        <div class="list-toolbar">
+          <p id="requests-status" class="status" role="status">Đăng nhập để xem phiếu yêu cầu.</p>
+          <div class="toolbar-actions">
+            <label id="filter-wrap" class="field inline-field" for="status-filter" hidden>Trạng thái
+              <select id="status-filter">
+                <option value="PENDING">Chờ duyệt</option>
+                <option value="">Tất cả</option>
+                <option value="APPROVED">Đã duyệt</option>
+                <option value="REJECTED">Bị từ chối</option>
+              </select>
+            </label>
+            <button id="requests-reload" class="action-button small-button ghost-button" type="button" disabled>Tải lại</button>
+          </div>
+        </div>
+        <p id="decision-status" class="feedback" role="status"></p>
+        <ul id="request-list" class="ticket-list" aria-label="Danh sách phiếu yêu cầu"></ul>
+        <div class="pager">
+          <button id="prev-page" class="action-button small-button ghost-button" type="button" disabled>Trang trước</button>
+          <span id="page-info" class="note"></span>
+          <button id="next-page" class="action-button small-button ghost-button" type="button" disabled>Trang sau</button>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer-note">StayHub demo · Claims ở frontend chỉ phục vụ hiển thị; backend xác minh quyền và quyết định kết quả.</footer>
+  </div>
+</body>
+</html>

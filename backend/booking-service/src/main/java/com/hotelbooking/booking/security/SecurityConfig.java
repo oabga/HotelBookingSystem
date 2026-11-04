@@ -39,6 +39,13 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // Đặt trước các rule chung: "/bookings/*" cũng khớp "/bookings/reschedulable".
+                        .requestMatchers(HttpMethod.GET, "/bookings/reschedulable")
+                        .hasRole(StayHubJwtValidator.ROLE_USER)
+                        .requestMatchers(HttpMethod.POST, "/bookings/*/reschedule")
+                        .hasRole(StayHubJwtValidator.ROLE_ADMIN)
+                        .requestMatchers(HttpMethod.GET, "/bookings/*/reschedule-quote")
+                        .hasAnyRole(StayHubJwtValidator.ROLE_USER, StayHubJwtValidator.ROLE_ADMIN)
                         .requestMatchers(HttpMethod.POST, "/bookings", "/bookings/*/payment", "/bookings/*/cancel")
                         .hasRole(StayHubJwtValidator.ROLE_USER)
                         .requestMatchers(HttpMethod.GET, "/bookings", "/bookings/*")

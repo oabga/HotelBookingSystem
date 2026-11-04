@@ -1,0 +1,34 @@
+server:
+  port: 8085
+
+spring:
+  application:
+    name: support-service
+  datasource:
+    url: jdbc:postgresql://localhost:5432/hotelbooking
+    username: hotelbooking
+    password: hotelbooking
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    locations: classpath:db/migration
+    table: flyway_schema_history_support
+    # Dùng chung schema "public" với IAM, Catalog, Booking nên Flyway đòi baseline.
+    # baseline-version: 0 đảm bảo baseline nằm dưới V1 để V1 vẫn chạy.
+    baseline-on-migrate: true
+    baseline-version: 0
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # iam-service không có OIDC discovery nên dùng jwk-set-uri trực tiếp.
+          jwk-set-uri: http://localhost:8084/.well-known/jwks.json
+
+security:
+  jwt:
+    issuer: http://localhost:8084
+
+booking:
+  base-url: http://localhost:8082
