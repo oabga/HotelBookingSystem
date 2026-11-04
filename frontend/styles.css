@@ -7,7 +7,7 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; }
-button, input { font: inherit; }
+button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
 
@@ -40,9 +40,6 @@ button:disabled { cursor: not-allowed; }
 .section-heading p { max-width: 520px; margin: 0; color: #5b6d66; font-size: .9rem; line-height: 1.45; }
 .status { margin: 0 0 14px; color: #365d52; line-height: 1.45; }
 .room-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
-.room-list li { min-height: 100px; padding: 22px; border: 1px solid #dce5df; border-radius: 13px; background: #fff; font-weight: 650; line-height: 1.6; overflow-wrap: anywhere; }
-.room-list button { display: block; margin-top: 12px; padding: 7px 10px; border: 1px solid #146d5b; border-radius: 7px; background: #fff; color: #146d5b; font-weight: 700; }
-.room-list button:hover { background: #e6f6ee; }
 .note { color: #66756f; font-size: .88rem; line-height: 1.5; }
 
 .action-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
@@ -55,8 +52,8 @@ button:disabled { cursor: not-allowed; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .field { display: block; min-width: 0; color: #314d45; font-size: .88rem; font-weight: 650; }
 .field.full { grid-column: 1 / -1; }
-.field input { display: block; width: 100%; margin-top: 7px; padding: 11px 12px; border: 1px solid #cbd9d2; border-radius: 8px; color: #173a30; background: #fff; }
-.field input:focus { outline: 2px solid #47a885; outline-offset: 1px; }
+.field input, .field select, .field textarea { display: block; width: 100%; margin-top: 7px; padding: 11px 12px; border: 1px solid #cbd9d2; border-radius: 8px; color: #173a30; background: #fff; }
+.field input:focus, .field select:focus, .field textarea:focus { outline: 2px solid #47a885; outline-offset: 1px; }
 .action-button { margin-top: 16px; padding: 11px 16px; border: 0; border-radius: 9px; color: white; background: #146d5b; font-weight: 750; }
 .action-button:hover:not(:disabled) { background: #0e5446; }
 .action-button:disabled { background: #899e95; }
@@ -68,8 +65,61 @@ button:disabled { cursor: not-allowed; }
 .placeholder { margin: 0; padding: 15px; border: 1px dashed #c6d6ce; border-radius: 9px; color: #5b7167; background: #f8fbf8; }
 .footer-note { margin-top: 34px; padding-top: 18px; border-top: 1px solid #dce5df; color: #687b71; font-size: .82rem; }
 
+.search-grid { grid-template-columns: 2fr 1fr 1fr; }
+.section > .panel { margin-bottom: 16px; }
+.room-card, .booking-card { min-width: 0; padding: 20px; border: 1px solid #dce5df; border-radius: 13px; background: #fff; line-height: 1.5; overflow-wrap: anywhere; }
+.room-card strong, .booking-card strong { font-size: 1.05rem; }
+.room-card p, .booking-card p { margin: 6px 0 0; color: #455c54; font-size: .92rem; }
+.room-card .field { margin-top: 14px; }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.pill { flex: none; padding: 3px 10px; border-radius: 999px; font-size: .76rem; font-weight: 750; }
+.pill-pending_payment { color: #8a5a00; background: #fdf1d6; }
+.pill-confirmed { color: #0e5446; background: #dcf3e8; }
+.pill-cancelled { color: #5b6d66; background: #e9eeeb; }
+.pill-expired { color: #9a2f22; background: #fbe6e2; }
+.pill-open { color: #1f5a85; background: #e0effa; }
+.pill-in_progress { color: #8a5a00; background: #fdf1d6; }
+.pill-resolved { color: #0e5446; background: #dcf3e8; }
+.pill-closed { color: #5b6d66; background: #e9eeeb; }
+.toolbar-actions { display: flex; align-items: end; gap: 10px; }
+.inline-field select { margin-top: 4px; padding: 7px 10px; }
+.decision-box { margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5ece8; }
+.pill-pending { color: #8a5a00; background: #fdf1d6; }
+.pill-approved { color: #0e5446; background: #dcf3e8; }
+.pill-rejected { color: #9a2f22; background: #fbe6e2; }
+.ticket-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin: 14px 0 0; padding: 0; list-style: none; }
+.pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+.pager .small-button { margin-top: 0; }
+.pager .note { margin: 0; }
+.detail-title { margin: 0; font-size: 1.25rem; overflow-wrap: anywhere; }
+.ticket-text { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+.message-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.message { padding: 12px 14px; border: 1px solid #dce5df; border-radius: 10px; background: #f8fbf8; }
+.message-admin { border-color: #c9dcea; background: #eef6fb; }
+.message > .message-meta { display: block; margin-top: 8px; }
+.message > button { display: block; }
+.message-meta { color: #63736e; font-size: .8rem; font-weight: 700; }
+#reply-form { margin-top: 14px; }
+textarea { resize: vertical; }
+.list-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.list-toolbar .status { margin: 0; }
+.small-button { margin-top: 10px; padding: 8px 12px; font-size: .88rem; }
+.ghost-button { border: 1px solid #146d5b; color: #146d5b; background: #fff; }
+.ghost-button:hover:not(:disabled) { color: #fff; }
+.ghost-button:disabled { border-color: #c6d6ce; color: #899e95; background: #fff; }
+.list-toolbar .small-button { margin-top: 0; flex: none; }
+#booking-list { margin-top: 14px; }
+.wide-panel { grid-column: 1 / -1; }
+.table-scroll { margin-top: 14px; overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+th, td { padding: 9px 12px; border-bottom: 1px solid #e5ece8; text-align: left; white-space: nowrap; }
+th { color: #52716b; font-size: .78rem; font-weight: 800; }
+td:nth-child(n+4), th:nth-child(n+4) { text-align: right; font-variant-numeric: tabular-nums; }
+[hidden] { display: none !important; }
+
 @media (max-width: 760px) {
-  .hero, .action-grid { grid-template-columns: 1fr; }
+  .hero, .action-grid, .search-grid { grid-template-columns: 1fr; }
   .hero { padding: 28px; }
   .account-strip { grid-template-columns: 1fr; }
   .section-heading { display: block; }

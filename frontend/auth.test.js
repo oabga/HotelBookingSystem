@@ -20,7 +20,7 @@ function sampleToken(role = "USER", tenantId = 1) {
 }
 
 test("Login button navigates to the correct IAM URL for each app", () => {
-  for (const appId of ["app1", "app2"]) {
+  for (const appId of ["app1", "app2", "app3"]) {
     const page = fakePage(appId, "", "/");
     const auth = initAuth(page.win, page.doc);
     assert.equal(page.elements.get("login-button").disabled, false);

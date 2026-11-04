@@ -1,13 +1,18 @@
 import { createServer, request as httpRequest } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { generateKeyPairSync, sign } from 'node:crypto';
+import { generateKeyPairSync, randomUUID, sign } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT || 8090);
+// Chạy trực tiếp thì chỉ nghe trên loopback. docker-compose.yml đặt HOST và CATALOG_HOST
+// vì trong container phải nghe trên mọi interface và Catalog nằm ở container khác.
+const host = process.env.HOST || '127.0.0.1';
+const catalogHost = process.env.CATALOG_HOST || '127.0.0.1';
 const issuer = `http://127.0.0.1:${port}`;
-const keyId = 'catalog-local-test-key';
+// Khóa được tạo mới mỗi lần chạy nên kid cũng phải mới: service đã cache JWKS chỉ tải lại khi gặp kid lạ.
+const keyId = `catalog-local-test-key-${randomUUID()}`;
 const { privateKey, publicKey } = generateKeyPairSync('rsa', {
   modulusLength: 2048,
   publicExponent: 0x10001,
@@ -79,7 +84,7 @@ const server = createServer(async (req, res) => {
   if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
     const targetPath = `${url.pathname.slice(4) || '/'}${url.search}`;
     const upstream = httpRequest({
-      hostname: '127.0.0.1',
+      hostname: catalogHost,
       port: 8081,
       method: req.method,
       path: targetPath,
@@ -97,7 +102,7 @@ const server = createServer(async (req, res) => {
   res.end('Not found');
 });
 
-server.listen(port, '127.0.0.1', () => {
+server.listen(port, host, () => {
   console.log(`Catalog local test page: ${issuer}`);
   console.log(`Temporary JWKS issuer: ${issuer}`);
   console.log('This harness is for local API checks only; it is not the IAM service.');
