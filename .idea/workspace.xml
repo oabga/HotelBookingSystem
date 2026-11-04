@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="1ffab5b7-aa73-4f05-93b0-df4c2195a9c2" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/backend/api-gateway/src/main/resources/application.yml" beforeDir="false" afterPath="$PROJECT_DIR$/backend/api-gateway/src/main/resources/application.yml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/iam-service/src/main/java/com/hotelbooking/iam/IamServiceApplication.java" beforeDir="false" afterPath="$PROJECT_DIR$/backend/iam-service/src/main/java/com/hotelbooking/iam/IamServiceApplication.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/iam-service/src/main/resources/application.yml" beforeDir="false" afterPath="$PROJECT_DIR$/backend/iam-service/src/main/resources/application.yml" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;oabga&quot;
+  }
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;git@github.com:oabga/HotelBookingSystem.git&quot;,
+    &quot;accountId&quot;: &quot;54624090-3381-489f-a2e1-cf6f174b64b5&quot;
+  }
+}</component>
+  <component name="NextEditCompletionFeaturesState">
+    <decayedCancelled>
+      <entry key="MS100" value="1.6315414614375197" />
+      <entry key="MS500" value="4.294248260206662" />
+      <entry key="S2" value="9.363532678089863" />
+      <entry key="S5" value="12.630979768429802" />
+      <entry key="S10" value="14.163037364094091" />
+      <entry key="S30" value="15.349911636108304" />
+      <entry key="S60" value="15.68604800443112" />
+      <entry key="M2" value="16.879419103057998" />
+      <entry key="M5" value="30.011758858509435" />
+      <entry key="M10" value="54.556823264625116" />
+      <entry key="M15" value="75.50391455542959" />
+      <entry key="M30" value="134.14469112805608" />
+      <entry key="H1" value="246.0362774568479" />
+      <entry key="H2" value="454.58181997455944" />
+      <entry key="H4" value="742.7261678346936" />
+      <entry key="D1" value="1265.4519886686644" />
+      <entry key="W1" value="1402.3427137613805" />
+    </decayedCancelled>
+    <decayedSelected>
+      <entry key="MS100" value="0.0" />
+      <entry key="MS500" value="0.0" />
+      <entry key="S2" value="0.0" />
+      <entry key="S5" value="0.0" />
+      <entry key="S10" value="1.9998612732694284E-210" />
+      <entry key="S30" value="1.2598919184333222E-70" />
+      <entry key="S60" value="1.122449071643475E-35" />
+      <entry key="M2" value="3.350297108680763E-18" />
+      <entry key="M5" value="1.0233715257623796E-7" />
+      <entry key="M10" value="3.199019610219319E-4" />
+      <entry key="M15" value="0.004677862473312435" />
+      <entry key="M30" value="0.06927330428625261" />
+      <entry key="H1" value="0.3034592918476621" />
+      <entry key="H2" value="0.8009389866335218" />
+      <entry key="H4" value="1.4760532423547383" />
+      <entry key="D1" value="2.648117584220365" />
+      <entry key="W1" value="2.9465540015753753" />
+    </decayedSelected>
+    <decayedShown>
+      <entry key="MS100" value="1.6050101974527076" />
+      <entry key="MS500" value="4.278459906380513" />
+      <entry key="S2" value="9.353042409277215" />
+      <entry key="S5" value="12.624760443824114" />
+      <entry key="S10" value="14.159426933917077" />
+      <entry key="S30" value="15.348575770832571" />
+      <entry key="S60" value="15.685360966340705" />
+      <entry key="M2" value="16.879036662769085" />
+      <entry key="M5" value="30.011430786684492" />
+      <entry key="M10" value="54.55681448337734" />
+      <entry key="M15" value="75.50822632235284" />
+      <entry key="M30" value="134.213279396846" />
+      <entry key="H1" value="246.33867640743762" />
+      <entry key="H2" value="455.3815808330896" />
+      <entry key="H4" value="744.2012273668408" />
+      <entry key="D1" value="1268.09982712813" />
+      <entry key="W1" value="1405.2892237855306" />
+    </decayedShown>
+  </component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 1,
+  &quot;fromUser&quot;: false
+}</component>
+  <component name="ProjectId" id="3LXFEB5hhxDTeawgct788nFjVka" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "codeWithMe.voiceChat.enabledByDefault": "false",
+    "git-widget-placeholder": "feat/a-iam-google-sso",
+    "kotlin-language-version-configured": "true",
+    "last_opened_file_path": "/home/oabga/IdeaProjects/SpringExample",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "python.packages.toolwindow.project.migrated.to.right.top.v2": "true",
+    "settings.editor.selected.configurable": "preferences.customizations"
+  }
+}]]></component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-jdk-30f59d01ecdd-a203e0a19954-intellij.indexing.shared.core-IU-262.10968.63" />
+        <option value="bundled-js-predefined-d6986cc7102b-4abd2a77f808-JavaScript-IU-262.10968.63" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="1ffab5b7-aa73-4f05-93b0-df4c2195a9c2" name="Changes" comment="" />
+      <created>1793592392036</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1793592392036</updated>
+    </task>
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+</project>
