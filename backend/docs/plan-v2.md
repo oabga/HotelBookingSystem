@@ -24,7 +24,7 @@
 
 **Mức thanh toán:** MVP mô phỏng kết quả thanh toán, không tích hợp cổng thanh toán thật. Không notification, không idempotency-key, không PKCE public-client riêng ở frontend, không xây website hoàn chỉnh.
 
-> **Phạm vi số liệu 8/9:** tính theo **9 chủ đề trong `team-plan.md`**, không phải 9 thư viện độc lập. **Chủ đề Mobile Push Notification bị bỏ**. IAM/SSO/PKCE chỉ tính đạt khi chứng minh được **cả ba nội dung** phù hợp với cách triển khai Google ở plan này. Nếu mentor bắt buộc phải thấy push thì phải xin xác nhận điều chỉnh phạm vi, không tuyên bố đã đạt đủ 9/9.
+> **Phạm vi số liệu 8/9:** tính theo **9 chủ đề mentor giao (bảng ở §10)**, không phải 9 thư viện độc lập. **Chủ đề Mobile Push Notification bị bỏ**. IAM/SSO/PKCE chỉ tính đạt khi chứng minh được **cả ba nội dung** phù hợp với cách triển khai Google ở plan này. Nếu mentor bắt buộc phải thấy push thì phải xin xác nhận điều chỉnh phạm vi, không tuyên bố đã đạt đủ 9/9.
 
 ---
 
@@ -350,7 +350,7 @@ docs/
   sequence-catalog.md           # B
   sequence-booking.md           # C
   known-limitations.md          # cả nhóm cung cấp, D tổng hợp
-frontend-demo/
+frontend/                       # cùng cấp với backend/
   app1/                         # D, host local :3000
   app2/                         # D, host local :3001
 ```
