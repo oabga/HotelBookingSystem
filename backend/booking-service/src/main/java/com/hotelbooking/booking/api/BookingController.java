@@ -31,8 +31,8 @@ public class BookingController {
     @ResponseStatus(HttpStatus.CREATED)
     public BookingResponse create(@AuthenticationPrincipal Jwt jwt,
                                   @Valid @RequestBody CreateBookingRequest request) {
-        return BookingResponse.from(
-                bookingService.create(CurrentUser.from(jwt), request.roomId(), request.checkIn(), request.checkOut()));
+        return BookingResponse.from(bookingService.create(
+                CurrentUser.from(jwt), request.roomTypeId(), request.checkIn(), request.checkOut(), request.roomCount()));
     }
 
     @GetMapping
@@ -45,5 +45,15 @@ public class BookingController {
     @GetMapping("/{id}")
     public BookingResponse get(@AuthenticationPrincipal Jwt jwt, @PathVariable @Positive Long id) {
         return BookingResponse.from(bookingService.get(CurrentUser.from(jwt), id));
+    }
+
+    @PostMapping("/{id}/payment")
+    public BookingResponse pay(@AuthenticationPrincipal Jwt jwt, @PathVariable @Positive Long id) {
+        return BookingResponse.from(bookingService.pay(CurrentUser.from(jwt), id));
+    }
+
+    @PostMapping("/{id}/cancel")
+    public BookingResponse cancel(@AuthenticationPrincipal Jwt jwt, @PathVariable @Positive Long id) {
+        return BookingResponse.from(bookingService.cancel(CurrentUser.from(jwt), id));
     }
 }

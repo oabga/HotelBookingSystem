@@ -34,3 +34,11 @@ security:
   jwt:
     # Giá trị claim "iss" phải khớp khi xác minh token; không gọi discovery.
     issuer: http://localhost:8084
+
+booking:
+  payment:
+    # Thời gian giữ phòng chờ thanh toán. Rút ngắn khi demo để không phải chờ 15 phút.
+    hold: PT15M
+  expiry:
+    # Chu kỳ job đổi đơn quá hạn sang EXPIRED; phòng được trả chậm tối đa một chu kỳ.
+    interval: PT60S
