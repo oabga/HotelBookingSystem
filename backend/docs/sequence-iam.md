@@ -5,6 +5,132 @@
 > của toàn bộ phần IAM đã code trong `iam-service` và `api-gateway`, để A (và D khi tổng hợp demo)
 > hiểu đúng từng bước, không chỉ đọc code. Nguồn hợp đồng: `docs/api-contract.md` §3, §6.
 
+## 0.0 Đọc trước khi đọc phần kỹ thuật — luồng end-to-end bằng ví dụ thật, step-by-step
+
+Phần này kể lại đúng 1 lượt đăng nhập + 1 lượt gọi API, bằng dữ liệu cụ thể, **không dùng sơ đồ**,
+để trả lời câu hỏi "lúc người dùng vào trang booking ấn đăng nhập, qua IAM, qua Google, rồi làm
+sao biết được họ *được phép làm gì*". Nhân vật: `user-tenant1@example.com` — đã được provision sẵn
+trong `app_user` với `tenant_id=1`, `role=USER`.
+
+### Giai đoạn 1 — Đăng nhập (AuthN: "xác định user là ai")
+
+**1.** User mở `http://localhost:3000` (App1), bấm "Login with Google".
+
+**2.** JS của App1 chỉ làm một việc: `window.location.assign("http://localhost:8084/auth/start?app=app1")`.
+Đây là **chuyển cả trang** sang domain IAM (`:8084`), không phải gọi API ngầm. Browser rời App1,
+đứng ở IAM.
+
+**3.** IAM (`AuthController`) chạy: kiểm `app=app1` có trong allowlist không → có. Lưu `"app1"` vào
+**session của chính IAM** (set cookie `JSESSIONID` cho domain `:8084`) để sau này còn biết "ban
+đầu bấm login từ app nào". IAM lúc này **chưa biết user là ai cả**.
+
+**4.** Vì chưa từng đăng nhập, IAM redirect tiếp sang `/oauth2/authorization/google`. Spring
+Security sinh `code_verifier` (chuỗi random, **giữ trên server IAM**, không gửi cho ai) và
+`code_challenge = hash(code_verifier)`, rồi redirect browser sang Google kèm `code_challenge`.
+
+**5.** User thấy trang Google thật, nhập mật khẩu (hoặc đã login sẵn), bấm "Cho phép". **Mật khẩu
+này IAM không bao giờ thấy** — chỉ Google xử lý.
+
+**6.** Google redirect browser về `http://localhost:8084/login/oauth2/code/google?code=XYZ123&state=...`
+— trả về **IAM**, không trả về App1. `code=XYZ123` chỉ là mã tạm, chưa phải thông tin user.
+
+**7.** IAM kiểm `state` khớp lúc nãy (chống giả mạo), rồi **tự gọi thẳng sang Google** (server gọi
+server, browser không tham gia): gửi `code` + `code_verifier` (giữ từ bước 4) + `client_secret`.
+Google hash lại `code_verifier`, so khớp `code_challenge` đã nhận trước đó → khớp → Google trả về
+**ID token** (JWT do **Google** ký, chứa `email: user-tenant1@example.com`, `email_verified: true`,
+`sub: "google-xyz..."`).
+
+**8.** IAM giờ biết: "theo Google, người này là `user-tenant1@example.com`, email đã xác minh".
+Đây vẫn là token **của Google**, chưa phải JWT của StayHub.
+
+**9.** `SsoAuthenticationSuccessHandler` chạy, gọi `SsoLoginService.completeLogin(...)`:
+   1. `email_verified == true`? → có.
+   2. Chuẩn hoá email về chữ thường: `user-tenant1@example.com`.
+   3. **Tra DB**: `SELECT * FROM app_user WHERE email = 'user-tenant1@example.com'` → tìm được
+      `id=2, tenant_id=1, role=USER, google_sub=NULL`.
+   4. `google_sub` còn `NULL` (lần đầu) → ghi luôn `UPDATE app_user SET google_sub='google-xyz...'`.
+      Từ giờ email này chỉ login được bằng đúng Google account này.
+
+**10.** IAM **tự tạo** JWT riêng của StayHub (khác hẳn ID token của Google ở bước 7):
+
+```json
+{"iss":"http://localhost:8084","sub":"2","email":"user-tenant1@example.com",
+ "tenant_id":1,"role":"USER","iat":1793...,"exp":1793...(+15 phút)}
+```
+
+Ký bằng **private key RSA chỉ IAM có**.
+
+**11.** IAM redirect browser về `http://localhost:3000/callback/#token=eyJhbGci...`. JWT nằm sau
+dấu `#` — phần này **không bao giờ gửi lên server nào**, chỉ JS phía browser đọc được qua
+`location.hash`.
+
+**12.** App1's JS đọc `location.hash`, lấy JWT, lưu vào biến JS trong bộ nhớ (không localStorage),
+xoá fragment khỏi URL. Xong — **user đã đăng nhập**. Toàn bộ bước 1→12 chỉ để tạo ra **một chuỗi
+JWT duy nhất này**.
+
+### Giai đoạn 2 — User bấm "Đặt phòng" (AuthZ: "user này được làm gì")
+
+Từ đây, JWT ở bước 12 là thứ duy nhất chứng minh user là ai — không còn session/cookie nào liên
+quan tới việc này nữa.
+
+**13.** User bấm "Đặt phòng". App1's JS gọi bằng `fetch` (ngầm, không chuyển trang):
+```
+POST http://localhost:8080/api/bookings
+Authorization: Bearer eyJhbGci...
+Body: {"roomTypeId":1,"checkIn":"2026-11-24","checkOut":"2026-11-26","roomCount":1}
+```
+
+**14.** Request chạm `api-gateway` (:8080) đầu tiên. Gateway verify chữ ký JWT:
+- Tải public key của IAM qua `GET http://localhost:8084/.well-known/jwks.json` (chỉ tải khi cache
+  hết hạn, không phải mỗi request).
+- Verify: chữ ký JWT có đúng do private key của IAM ký không? → đúng (Gateway không có private
+  key, chỉ IAM ký được).
+- Kiểm thêm: `iss` đúng `http://localhost:8084`? `exp` chưa quá hạn? `tenant_id` là số? `role` ∈
+  {USER, ADMIN}?
+- Tất cả đúng → Gateway forward **nguyên** header `Authorization` sang `booking-service` (`:8082`),
+  đổi `/api/bookings` → `/bookings`.
+
+→ Gateway **chỉ kiểm "token có thật không"**, chưa quan tâm user này được đặt phòng hay không.
+
+**15.** `booking-service` nhận request, **tự verify lại JWT từ đầu** (không tin Gateway đã check —
+đề phòng ai đó gọi thẳng `:8082` bỏ qua Gateway).
+
+**16.** Sau khi verify chữ ký, tra tiếp: "endpoint `POST /bookings` yêu cầu role gì?" → code khai
+`hasRole("USER")`. Lấy `role` từ JWT = `"USER"` → khớp → cho qua. (Nếu JWT có `role: "ADMIN"`, bị
+chặn **403** ngay tại đây, không chạy code bên dưới.)
+
+**17.** Vào logic nghiệp vụ, code lấy **tenant_id và email từ JWT đã verify** — tuyệt đối không lấy
+từ body client gửi (client có thể gửi giả `tenant_id: 999`):
+```java
+CurrentUser user = CurrentUser.from(jwt); // tenantId=1, email="user-tenant1@example.com"
+```
+
+**18.** Query DB: `SELECT room_type WHERE id=1 AND tenant_id=1` (số `1` lấy từ JWT, không từ URL).
+Nếu `roomTypeId=1` thực ra thuộc tenant 2 → không tìm thấy → **404** (không tiết lộ "có nhưng
+không phải của bạn").
+
+**19.** Tìm thấy đúng room type → chạy transaction trừ tồn (`UPDATE room_inventory SET sold=sold+1
+WHERE ... sold+1<=total`). Hết phòng → **409**. Còn phòng → `INSERT booking (tenant_id=1,
+user_email='user-tenant1@example.com', status='PENDING_PAYMENT', ...)` — cả `tenant_id` và
+`user_email` ghi vào DB cũng lấy từ JWT, nên booking này chắc chắn đúng của user này, tenant này,
+không ai giả mạo được.
+
+**20.** Trả **201** kèm JSON booking về qua Gateway, về tới App1.
+
+### Tóm một câu
+
+- **Đăng nhập (bước 1→12)** chỉ để tạo ra **1 JWT** — như cấp "chứng minh nhân dân". IAM làm việc
+  này **một lần**, xong là thôi, không còn liên quan gì tới các request sau.
+- **Mỗi request sau đó (bước 13→20)**, không ai hỏi lại IAM "token này còn sống không" — Gateway
+  và từng service **tự đọc chữ ký + nội dung JWT** (vì JWT đã bị ký, không sửa được) để tự quyết:
+  *(a)* token thật không, *(b)* role này được gọi endpoint này không, *(c)* dữ liệu trong DB có
+  đúng thuộc `tenant_id`/`email` ghi trong JWT không.
+
+Phần còn lại của file (§0 trở xuống) đi sâu **vì sao** từng quyết định kỹ thuật ở trên được chọn
+(PKCE, RS256, JWKS...) và vẽ lại các luồng này bằng sequence diagram cho ai quen đọc sơ đồ hơn.
+
+---
+
 ## 0. Vì sao thiết kế thế này — kiến thức nền
 
 ### 0.1 OAuth2 Authorization Code Flow là gì
@@ -333,44 +459,41 @@ có `anyRequest().authenticated()` nên dùng `setStatus`, tránh `sendError`, t
 
 ### 9.1 Bắt buộc để demo chạy được thật (chặn cứng)
 
-- [ ] **Tạo Google OAuth Client** tại Google Cloud Console:
-  - Loại **Web application**.
-  - Authorized redirect URI: **chính xác** `http://localhost:8084/login/oauth2/code/google`
-    (không thêm `/` thừa, không dùng `127.0.0.1`).
-  - Lấy `Client ID` + `Client secret`, **không commit vào Git** — set qua biến môi trường
-    `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` khi chạy `iam-service`.
-  - Thêm OAuth consent screen ở chế độ **Testing**, thêm các **Test users** là các email Gmail
-    thật sẽ dùng để demo (ADMIN_1, USER_1, USER_1B, ADMIN_2, USER_2 theo alias ở
-    `docs/api-contract.md` §7.1).
-- [ ] **Seed `app_user` thật** (không commit email thật):
-  - Tạo file `docker/seed/seed-app-users.local.sql` (đã có trong `.gitignore` theo plan) insert
-    5 dòng theo alias: `admin-tenant1@...`, `user-tenant1@...`, `user2-tenant1@...`,
-    `admin-tenant2@...`, `user-tenant2@...` — thay bằng email Gmail thật của nhóm, `tenant_id`
-    và `role` đúng bảng seed. `google_sub` để `NULL`, IAM sẽ tự bind ở lần login đầu.
-  - Chạy file này trực tiếp vào DB (`psql` hoặc client bất kỳ) sau khi `iam-service` đã migrate
-    xong bảng `app_user`.
-- [ ] **Test login thật bằng ít nhất 1 email đã seed:**
-  1. `docker compose up -d postgres`
-  2. `GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... ./gradlew :iam-service:bootRun`
-  3. Mở browser thật, vào `http://localhost:8084/auth/start?app=app1`
-  4. Đăng nhập Google bằng email đã seed → kỳ vọng: redirect về
-     `http://localhost:3000/callback/#token=...` (App 1 chưa tồn tại thì sẽ 404 ở bước cuối, đó là
-     bình thường — D chưa làm callback page; vẫn chứng minh được JWT đã phát qua Network tab).
-  5. Mở DevTools → Network → request `authorize` tới Google → xác nhận có
-     `code_challenge`/`code_challenge_method=S256` thật (không chỉ tin vào test ở môi trường giả).
-  6. Test email **chưa seed** → kỳ vọng 403, không tạo `app_user` mới.
-- [ ] **Test SSO 2 app thật:** sau bước trên, mở `http://localhost:8084/auth/start?app=app2` trong
-  cùng browser profile → xác nhận không bị hỏi lại mật khẩu Google.
+- [x] **Tạo Google OAuth Client** tại Google Cloud Console — xong, Web application, redirect URI
+  `http://localhost:8084/login/oauth2/code/google`, consent screen ở Testing, test user
+  `legiabao9873@gmail.com` đã thêm. Client ID/Secret lưu local trong `backend/.env.local`
+  (gitignored), nạp bằng `source .env.local` trước khi `bootRun`.
+- [x] **Seed `app_user` thật** — `docker/seed/seed-app-users.local.sql` đã có 5 dòng theo alias,
+  `legiabao9873@gmail.com` là ADMIN tenant 1. Đã verify chạy được cả sau khi reset DB
+  (`docker compose down -v`) bằng `psql ... < docker/seed/seed-app-users.local.sql`.
+- [x] **Test login thật** — PASS. Login bằng `legiabao9873@gmail.com` qua Incognito, redirect
+  đúng `http://localhost:3000/callback/#token=<jwt>`; decode token thấy đúng
+  `tenant_id:1, role:"ADMIN", email, iss:"http://localhost:8084"`, `exp-iat=900s`.
+  Request `GET https://accounts.google.com/o/oauth2/v2/auth` xác nhận có thật
+  `code_challenge=...&code_challenge_method=S256` trong Network tab (Keep log, cửa sổ Incognito
+  mới hoàn toàn để không bị SSO bỏ qua bước này).
+- [x] **Test case 403 (chưa provision)** — PASS. Xoá tạm dòng `app_user` của
+  `legiabao9873@gmail.com`, login lại qua Incognito mới → dừng lại ở
+  `localhost:8084/login/oauth2/code/google...`, **HTTP ERROR 403**, không có `#token=` nào trong
+  URL. Khôi phục lại dữ liệu sau test bằng `INSERT` lại (lưu ý: `id` đổi từ `1` → tăng dần theo
+  identity sequence, `google_sub` reset về `NULL`, IAM tự bind lại ở lần login kế tiếp).
+- [x] **Test SSO 2 app thật** — PASS (tín hiệu gián tiếp): mở `app=app2` trong cùng
+  cửa sổ/tab Incognito đã login `app1` → redirect thẳng ra `localhost:3001/callback/#token=...`
+  **không hiện lại màn hình đăng nhập Google**. Lưu ý: SSO xảy ra ở cấp **session cookie của
+  chính IAM** (`JSESSIONID` tại `:8084`) — mọi tab/cửa sổ cùng chia sẻ 1 Incognito profile đều
+  tính là "cùng session", không chỉ riêng 2 cửa sổ trình duyệt thường.
 
 ### 9.2 Cần làm để tích hợp với B/C/D
 
-- [ ] Chạy đồng thời `iam-service` (:8084) + `catalog-service` (:8081) + `booking-service`
-  (:8082) + `api-gateway` (:8080) trên cùng DB, test gọi `GET /api/hotels` qua Gateway bằng JWT
-  thật mint từ IAM → xác nhận 200 (hiện mới test JWT từ unit test giả, chưa test tích hợp 4
-  service cùng chạy).
-- [ ] Phối hợp B/C: do `booking-service` hiện có 17 test fail (migration cũ `V1__create_room.sql`
-  chưa khớp schema `room_type`/`room_inventory` — xem báo cáo trước), cần C cập nhật trước khi
-  test tích hợp end-to-end có ý nghĩa.
+- [x] Chạy đồng thời `iam-service` (:8084) + `catalog-service` (:8081) + `api-gateway` (:8080)
+  trên cùng DB, test `GET /api/hotels` qua Gateway bằng JWT thật mint từ IAM → **200 OK**, trả
+  đúng 2 khách sạn của `tenant_id=1`, không lộ khách sạn tenant 2. Xác nhận cả 2 lớp AuthN
+  (Gateway + Catalog verify JWT độc lập) hoạt động đúng với dữ liệu thật.
+- [ ] **`booking-service` không chạy được** — migration `V1__create_booking.sql` vẫn FK tới bảng
+  `room` (schema v2.0 cũ), trong khi Catalog đã migrate sang schema mới (`hotel`/`room_type`/
+  `room_inventory`). Lỗi thật khi chạy: `ERROR: relation "room" does not exist`. Đây là việc của
+  **C**, đã ghi nhận sẵn ở `docs/api-contract.md` §12 ("booking-service hiện vẫn chạy theo bản
+  2.0"), không tự sửa migration của C. Chặn hoàn toàn việc test luồng đặt phòng end-to-end.
 - [ ] Gửi D: cách lấy JWT test (không kèm secret thật) để D viết `docs/demo.http`,
   `docs/demo-data.md` alias.
 
