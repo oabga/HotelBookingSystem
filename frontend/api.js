@@ -1,8 +1,11 @@
-// Gọi Gateway và kiểm tra dữ liệu theo docs/api-contract.md v3.0. Không xử lý giao diện ở đây.
+// Gọi API Gateway và kiểm tra response shape. Không xử lý giao diện ở đây.
 (function () {
   "use strict";
 
-  const apiBase = "http://localhost:8080/api";
+  const configuredApiBase = typeof document !== "undefined"
+    ? document.querySelector('meta[name="stayhub-api-base"]')?.content?.trim()
+    : "";
+  const apiBase = (configuredApiBase || "http://localhost:8080/api").replace(/\/+$/, "");
   const hotelZone = "Asia/Ho_Chi_Minh";
   const maxNights = 30;
   const maxPrice = 99999999.99;

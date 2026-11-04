@@ -11,7 +11,22 @@
   function initApp(doc, auth, fetchFn, now) {
     const signedIn = Boolean(auth.bearerHeaders().Authorization);
     const role = signedIn ? auth.getDisplayRole() : null;
+    const appId = doc.body.dataset.appId;
+    const adminPortal = appId === "app2";
     const canManage = role === "ADMIN";
+
+    if (adminPortal) {
+      const authorized = signedIn && canManage;
+      doc.getElementById("catalog-section").hidden = !authorized;
+      doc.getElementById("bookings-section").hidden = !authorized;
+      doc.getElementById("admin-section").hidden = !authorized;
+      doc.getElementById("integration-status").textContent = !signedIn
+        ? "App 2 dành cho ADMIN. Đăng nhập bằng Google để tiếp tục."
+        : !canManage
+          ? "Tài khoản hiện tại không có quyền ADMIN nên App 2 không gọi API quản trị."
+          : "Đã xác thực giao diện ADMIN. Backend vẫn kiểm tra role và tenant cho từng API.";
+      if (!authorized) return null;
+    }
 
     doc.getElementById("admin-section").hidden = !canManage;
     doc.getElementById("bookings-title").textContent = canManage ? "Booking trong tenant" : "Booking của tôi";
