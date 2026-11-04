@@ -4,66 +4,89 @@ const fs = require("node:fs");
 const path = require("node:path");
 const api = require("./api.js");
 const { initSupport } = require("./support.js");
-const { FakeDocument, response, fakeFetch, fakeAuth, sampleBooking } = require("./test-support.js");
+const { FakeDocument, response, fakeFetch, fakeAuth } = require("./test-support.js");
 
-const LIST = "GET /api/support/tickets";
-const DETAIL = "GET /api/support/tickets/9";
-const CREATE = "POST /api/support/tickets";
-const REPLY = "POST /api/support/tickets/9/messages";
-const STATUS = "PATCH /api/support/tickets/9/status";
+const REQUESTS = "GET /api/support/date-change-requests";
+const CREATE = "POST /api/support/date-change-requests";
+const APPROVE = "POST /api/support/date-change-requests/9/approve";
+const REJECT = "POST /api/support/date-change-requests/9/reject";
+const BOOKINGS = "GET /api/bookings/reschedulable";
+const QUOTE = "GET /api/bookings/5/reschedule-quote";
+const NOTIFICATIONS = "GET /api/notifications";
 
-function ticket(overrides = {}) {
-  return {
-    id: 9, tenantId: 1, bookingId: 5, requesterEmail: "user@example.test",
-    subject: "Cần hỗ trợ", description: "Đổi giờ đến", status: "OPEN",
-    createdAt: "2026-11-04T05:00:00Z", updatedAt: "2026-11-04T05:00:00Z", closedAt: null,
-    ...overrides
-  };
-}
-const message = (overrides = {}) => ({
-  id: 3, ticketId: 9, authorUserId: 11, authorRole: "USER", body: "Xin chào", createdAt: "2026-11-04T05:01:00Z", ...overrides
+const booking = (overrides = {}) => ({
+  id: 5, roomTypeId: 1, roomTypeName: "Standard", hotelName: "Hà Nội",
+  checkIn: "2030-12-01", checkOut: "2030-12-03", roomCount: 2, totalAmount: 2000000, ...overrides
+});
+const quote = (overrides = {}) => ({
+  bookingId: 5, roomTypeId: 1, roomTypeName: "Standard", currentCheckIn: "2030-12-01", currentCheckOut: "2030-12-03",
+  checkIn: "2030-12-10", checkOut: "2030-12-13", nights: 3, roomCount: 2,
+  currentTotalAmount: 2000000, newTotalAmount: 3000000, available: true, ...overrides
+});
+const request = (overrides = {}) => ({
+  id: 9, tenantId: 1, bookingId: 5, requesterEmail: "user@example.test", roomTypeName: "Standard", roomCount: 2,
+  currentCheckIn: "2030-12-01", currentCheckOut: "2030-12-03", requestedCheckIn: "2030-12-10", requestedCheckOut: "2030-12-13",
+  currentTotalAmount: 2000000, newTotalAmount: 3000000, description: "Đổi vì công tác", status: "PENDING",
+  decisionNote: null, decidedAt: null, createdAt: "2030-11-04T05:00:00Z", ...overrides
+});
+const notification = (overrides = {}) => ({
+  id: 3, type: "DATE_CHANGE_APPROVED", title: "Yêu cầu đổi ngày đã được duyệt", body: "Booking #5 đã đổi sang 2030-12-10.",
+  referenceId: 9, readAt: null, createdAt: "2030-11-04T06:00:00Z", ...overrides
 });
 const page = (items, overrides = {}) => ({ items, page: 0, size: 10, totalElements: items.length, totalPages: items.length ? 1 : 0, ...overrides });
-const detail = (overrides = {}) => ticket({ messages: [], ...overrides });
+const inbox = (items, unreadCount = items.filter(item => item.readAt === null).length) => ({ ...page(items), unreadCount });
+
+function fakeTimers() {
+  const timers = { started: [], cleared: [] };
+  timers.setInterval = (handler, millis) => {
+    timers.started.push({ handler, millis });
+    return timers.started.length;
+  };
+  timers.clearInterval = id => timers.cleared.push(id);
+  return timers;
+}
 
 function setup(routes = {}, role = "USER") {
   const doc = new FakeDocument("app3");
   const fetchFn = fakeFetch({
-    [LIST]: response(200, page([ticket()])),
-    "GET /api/bookings": response(200, [sampleBooking()]),
-    [DETAIL]: response(200, detail()),
+    [REQUESTS]: response(200, page([])),
+    [BOOKINGS]: response(200, [booking()]),
+    [NOTIFICATIONS]: response(200, inbox([])),
+    [QUOTE]: response(200, quote()),
     ...routes
   });
-  const app = initSupport(doc, fakeAuth(role), fetchFn);
+  const timers = fakeTimers();
+  const app = initSupport(doc, fakeAuth(role), fetchFn, timers);
   const el = id => doc.getElementById(id);
-  const fill = (subject = "Cần hỗ trợ", description = "Đổi giờ đến") => {
-    el("ticket-subject").value = subject;
-    el("ticket-description").value = description;
+  const fill = () => {
+    el("change-booking").value = "5";
+    el("change-check-in").value = "2030-12-10";
+    el("change-check-out").value = "2030-12-13";
   };
-  const open = async () => {
+  const check = async () => {
     await app.ready;
-    await el("ticket-list").button("Xem").fire("click");
+    fill();
+    await el("check-button").fire("click");
     await tick();
   };
-  return { doc, el, fetchFn, app, fill, open };
+  const submit = async (description = "Đổi vì công tác") => {
+    await check();
+    el("change-description").value = description;
+    await el("change-form").fire("submit");
+  };
+  return { doc, el, fetchFn, app, timers, fill, check, submit };
 }
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
-// ---------- Khớp với HTML ----------
+// ---------- Khớp với HTML và server ----------
 
 test("Every element id used by the script exists in the Support Center page", () => {
   const html = fs.readFileSync(path.join(__dirname, "app3/index.html"), "utf8");
   const scripts = ["support.js", "auth.js"].map(file => fs.readFileSync(path.join(__dirname, file), "utf8")).join("\n");
   const used = [...scripts.matchAll(/getElementById\("([^"]+)"\)/g)].map(match => match[1]);
-  assert.ok(used.length > 15);
+  assert.ok(used.length > 20);
   for (const id of new Set(used)) assert.match(html, new RegExp('id="' + id + '"'), id);
-});
-
-test("Support Center page declares app3 and loads only its own scripts", () => {
-  const html = fs.readFileSync(path.join(__dirname, "app3/index.html"), "utf8");
-  assert.match(html, /data-app-id="app3"/);
-  assert.doesNotMatch(html, /bookings\.js|catalog\.js|admin\.js|\/app\.js/);
 });
 
 test("Static server serves the Support Center on port 3002", () => {
@@ -72,427 +95,452 @@ test("Static server serves the Support Center on port 3002", () => {
   assert.match(server, /"\/support\.js"/);
 });
 
+test("Support Center no longer calls the removed ticket API", () => {
+  const source = fs.readFileSync(path.join(__dirname, "support.js"), "utf8");
+  assert.doesNotMatch(source, /support\/tickets/);
+});
+
 // ---------- Đăng nhập và role ----------
 
-test("Signed-out page calls no API and hides the create form", () => {
+test("Signed-out page calls no API and shows no form", () => {
   const doc = new FakeDocument("app3");
   const fetchFn = fakeFetch({});
-  assert.equal(initSupport(doc, fakeAuth(null), fetchFn), null);
+  const timers = fakeTimers();
+  assert.equal(initSupport(doc, fakeAuth(null), fetchFn, timers), null);
   assert.equal(fetchFn.calls.length, 0);
+  assert.equal(timers.started.length, 0);
   assert.equal(doc.getElementById("create-panel").hidden, true);
+  assert.equal(doc.getElementById("notification-panel").hidden, true);
 });
 
-test("USER gets the create form and own booking options", async () => {
-  const { el, app } = setup();
+test("USER gets the form, notifications and polling, but no filter", async () => {
+  const { el, app, timers } = setup();
   await app.ready;
   assert.equal(el("create-panel").hidden, false);
-  assert.equal(el("tickets-title").textContent, "Ticket của tôi");
-  assert.deepEqual(el("ticket-booking").children.map(option => option.value), ["", "5"]);
+  assert.equal(el("notification-panel").hidden, false);
+  assert.equal(el("filter-wrap").hidden, true);
+  assert.equal(el("requests-title").textContent, "Phiếu của tôi");
+  assert.equal(timers.started[0].millis, 15000);
 });
 
-test("ADMIN has no create form and does not load bookings, and sees who sent each ticket", async () => {
-  const { el, fetchFn, app } = setup({}, "ADMIN");
+test("ADMIN gets only the request queue", async () => {
+  const { el, fetchFn, app, timers } = setup({}, "ADMIN");
   await app.ready;
   assert.equal(el("create-panel").hidden, true);
-  assert.equal(el("tickets-title").textContent, "Ticket trong tenant");
-  assert.equal(fetchFn.called("GET /api/bookings").length, 0);
-  assert.ok(el("ticket-list").textContent.includes("Người gửi: user@example.test"));
+  assert.equal(el("notification-panel").hidden, true);
+  assert.equal(el("filter-wrap").hidden, false);
+  assert.equal(el("requests-title").textContent, "Phiếu cần xử lý");
+  assert.equal(fetchFn.called(BOOKINGS).length, 0);
+  assert.equal(fetchFn.called(NOTIFICATIONS).length, 0);
+  assert.equal(timers.started.length, 0);
 });
 
-test("USER does not see requester line on own tickets", async () => {
-  const { el, app } = setup();
-  await app.ready;
-  assert.ok(!el("ticket-list").textContent.includes("Người gửi"));
-});
-
-test("A failed booking list still allows a general ticket", async () => {
-  const { el, app } = setup({ "GET /api/bookings": response(500) });
-  await app.ready;
-  assert.match(el("bookings-note").textContent, /vẫn có thể gửi/);
-  assert.equal(el("create-submit").disabled, false);
-});
-
-test("A 401 tells the user to log in again", async () => {
-  const { el, app } = setup({ [LIST]: response(401) });
+test("A 401 asks to log in again and stops polling", async () => {
+  const { el, app, timers } = setup({ [NOTIFICATIONS]: response(401) });
   await app.ready;
   assert.equal(el("login-status").textContent, api.sessionExpired);
-  assert.equal(el("tickets-status").textContent, api.sessionExpired);
+  assert.equal(el("notification-status").textContent, api.sessionExpired);
+  await tick();
+  assert.deepEqual(timers.cleared, [1]);
 });
 
-// ---------- Danh sách ----------
+// ---------- Chọn đơn ----------
 
-test("List requests a page through the Gateway and renders tickets", async () => {
-  const { el, fetchFn, app } = setup();
+test("Booking options show the room type, hotel and current dates", async () => {
+  const { el, app } = setup();
   await app.ready;
-  assert.equal(fetchFn.called(LIST)[0].url, "http://localhost:8080/api/support/tickets?page=0&size=10");
-  const text = el("ticket-list").textContent;
-  for (const part of ["#9 · Cần hỗ trợ", "Mới", "Booking #5"]) assert.ok(text.includes(part), part);
-  assert.equal(el("tickets-status").textContent, "Có 1 ticket.");
+  assert.deepEqual(el("change-booking").children.map(option => option.value), ["", "5"]);
+  const label = el("change-booking").children[1].textContent;
+  for (const part of ["Standard", "Hà Nội", "2030-12-01", "2030-12-03", "2 phòng"]) assert.ok(label.includes(part), part);
 });
 
-test("Empty list and general tickets are handled", async () => {
-  const empty = setup({ [LIST]: response(200, page([])) });
-  await empty.app.ready;
-  assert.equal(empty.el("tickets-status").textContent, "Chưa có ticket.");
-  const general = setup({ [LIST]: response(200, page([ticket({ bookingId: null })])) });
-  await general.app.ready;
-  assert.ok(general.el("ticket-list").textContent.includes("Không gắn booking"));
-});
-
-test("A ticket from another tenant blocks the whole list", async () => {
-  const { el, app } = setup({ [LIST]: response(200, page([ticket(), ticket({ id: 10, tenantId: 2 })])) });
+test("No eligible booking explains why", async () => {
+  const { el, app } = setup({ [BOOKINGS]: response(200, []) });
   await app.ready;
-  assert.equal(el("ticket-list").children.length, 0);
-  assert.match(el("tickets-status").textContent, /không hợp lệ/);
+  assert.match(el("bookings-note").textContent, /đã thanh toán và chưa tới ngày nhận phòng/);
 });
 
-test("List errors have their own messages", async () => {
-  for (const [route, pattern] of [[response(403), /chưa được cấp/], [response(500), /HTTP 500/], [new Error("down"), /Không kết nối/], [response(200), /không hợp lệ/]]) {
-    const { el, app } = setup({ [LIST]: route });
-    await app.ready;
-    assert.match(el("tickets-status").textContent, pattern);
+test("Invalid booking data is reported", async () => {
+  const { el, app } = setup({ [BOOKINGS]: response(200, [{ id: "x" }]) });
+  await app.ready;
+  assert.match(el("bookings-note").textContent, /không hợp lệ/);
+  assert.equal(el("change-booking").children.length, 0);
+});
+
+// ---------- Kiểm tra còn phòng ----------
+
+test("Sending stays disabled until a check finds rooms", async () => {
+  const { el, fetchFn, app, fill } = setup();
+  await app.ready;
+  assert.equal(el("change-submit").disabled, true);
+  assert.equal(fetchFn.called(QUOTE).length, 0, "no check before the button");
+  fill();
+  await el("check-button").fire("click");
+  await tick();
+  assert.equal(fetchFn.called(QUOTE)[0].url, "http://localhost:8080/api/bookings/5/reschedule-quote?checkIn=2030-12-10&checkOut=2030-12-13");
+  assert.equal(el("change-submit").disabled, false);
+  const text = el("quote-result").textContent;
+  for (const part of ["Còn phòng", "3 đêm", "2 phòng", "chưa được giữ"]) assert.ok(text.includes(part), part);
+  assert.match(text, /2\.000\.000 VND → 3\.000\.000 VND/);
+});
+
+test("No rooms keeps sending disabled", async () => {
+  const { el, check } = setup({ [QUOTE]: response(200, quote({ available: false })) });
+  await check();
+  assert.match(el("quote-result").textContent, /Không đủ phòng/);
+  assert.equal(el("change-submit").disabled, true);
+});
+
+test("Changing booking or dates requires checking again", async () => {
+  for (const id of ["change-booking", "change-check-in", "change-check-out"]) {
+    const { el, check } = setup();
+    await check();
+    assert.equal(el("change-submit").disabled, false);
+    await el(id).fire("change");
+    assert.equal(el("change-submit").disabled, true, id);
+    assert.equal(el("quote-result").textContent, "");
   }
 });
 
-test("Pager moves between pages and stops at the ends", async () => {
-  const first = response(200, page([ticket()], { totalElements: 11, totalPages: 2 }));
-  const second = response(200, page([ticket({ id: 10 })], { page: 1, totalElements: 11, totalPages: 2 }));
-  const { el, fetchFn, app } = setup({ [LIST]: [first, second, first] });
-  await app.ready;
-  assert.equal(el("prev-page").disabled, true);
-  assert.equal(el("next-page").disabled, false);
-  assert.equal(el("page-info").textContent, "Trang 1/2");
-
-  await el("next-page").fire("click");
-  await tick();
-  assert.match(fetchFn.called(LIST)[1].url, /page=1&size=10/);
-  assert.equal(el("next-page").disabled, true);
-  assert.equal(el("prev-page").disabled, false);
-
-  await el("prev-page").fire("click");
-  await tick();
-  assert.match(fetchFn.called(LIST)[2].url, /page=0&size=10/);
-});
-
-test("Reload button fetches the list again", async () => {
-  const { el, fetchFn, app } = setup();
-  await app.ready;
-  await el("tickets-reload").fire("click");
-  await tick();
-  assert.equal(fetchFn.called(LIST).length, 2);
-});
-
-// ---------- Tạo ticket ----------
-
-test("Create sends only subject, description and the chosen booking", async () => {
-  const { el, fetchFn, app, fill } = setup({ [CREATE]: response(201, ticket()) });
-  await app.ready;
-  fill("  Cần hỗ trợ ", " Đổi giờ đến\n");
-  el("ticket-booking").value = "5";
-  await el("create-form").fire("submit");
-  assert.deepEqual(fetchFn.called(CREATE)[0].body, { subject: "Cần hỗ trợ", description: "Đổi giờ đến", bookingId: 5 });
-  assert.match(el("create-status").textContent, /Đã tạo ticket #9/);
-  assert.equal(el("ticket-subject").value, "");
-  assert.equal(el("ticket-detail").hidden, false, "new ticket opens");
-});
-
-test("General ticket omits bookingId", async () => {
-  const { el, fetchFn, app, fill } = setup({ [CREATE]: response(201, ticket({ bookingId: null })) });
+test("A slow check answer is ignored once the input changed", async () => {
+  let release;
+  const { el, app, fill } = setup({ [QUOTE]: () => new Promise(resolve => { release = resolve; }) });
   await app.ready;
   fill();
-  await el("create-form").fire("submit");
-  assert.deepEqual(fetchFn.called(CREATE)[0].body, { subject: "Cần hỗ trợ", description: "Đổi giờ đến" });
-  assert.match(el("create-status").textContent, /Đã tạo/);
+  const running = el("check-button").fire("click");
+  await tick();
+  await el("change-check-out").fire("change");
+  release(response(200, quote()));
+  await running;
+  assert.equal(el("change-submit").disabled, true);
+  assert.equal(el("quote-result").textContent, "");
 });
 
-test("New ticket on a later page moves the list to that page", async () => {
-  const full = response(200, page([ticket({ id: 1 })], { totalElements: 11, totalPages: 2 }));
-  const last = response(200, page([ticket()], { page: 1, totalElements: 11, totalPages: 2 }));
-  const { el, fetchFn, app, fill } = setup({
-    [LIST]: [response(200, page([ticket({ id: 1 })], { totalElements: 10, totalPages: 1 })), full, last],
-    [CREATE]: response(201, ticket({ bookingId: null }))
-  });
-  await app.ready;
-  fill();
-  await el("create-form").fire("submit");
-  assert.match(fetchFn.called(LIST).at(-1).url, /page=1&size=10/);
-});
-
-test("Invalid ticket text never reaches the API", async () => {
+test("Invalid input never reaches the API", async () => {
   const cases = [
-    ["", "d", /tiêu đề/i], ["s", "  ", /nội dung/i], ["a".repeat(201), "d", /200/], ["s", "a".repeat(4001), /4000/],
-    ["dòng 1\ndòng 2", "d", /một dòng/], ["<b>x</b>", "d", /HTML/], ["s", "<script>", /HTML/], ["s", "a\u0000b", /ký tự/]
+    [() => {}, /Chọn đơn/],
+    [el => { el("change-booking").value = "5"; }, /Chọn đủ/],
+    [el => { el("change-booking").value = "5"; el("change-check-in").value = "2020-01-01"; el("change-check-out").value = "2020-01-03"; }, /quá khứ/],
+    [el => { el("change-booking").value = "5"; el("change-check-in").value = "2030-12-05"; el("change-check-out").value = "2030-12-05"; }, /sau ngày nhận/],
+    [el => { el("change-booking").value = "5"; el("change-check-in").value = "2030-12-01"; el("change-check-out").value = "2031-01-05"; }, /tối đa 30/],
+    [el => { el("change-booking").value = "5"; el("change-check-in").value = "2030-12-01"; el("change-check-out").value = "2030-12-03"; }, /phải khác/]
   ];
-  for (const [subject, description, pattern] of cases) {
-    const { el, fetchFn, app, fill } = setup();
+  for (const [prepare, pattern] of cases) {
+    const { el, fetchFn, app } = setup();
     await app.ready;
-    fill(subject, description);
-    await el("create-form").fire("submit");
-    assert.match(el("create-status").textContent, pattern, subject);
+    prepare(el);
+    await el("check-button").fire("click");
+    assert.match(el("quote-result").textContent, pattern);
+    assert.equal(fetchFn.called(QUOTE).length, 0);
+  }
+});
+
+test("Check failures have their own messages", async () => {
+  const cases = [[response(400), /không hợp lệ/], [response(404), /Không tìm thấy/], [response(409), /không còn đổi được/], [response(500), /HTTP 500/], [new Error("down"), /Không kết nối/], [response(200, { x: 1 }), /Không đọc được/]];
+  for (const [route, pattern] of cases) {
+    const { el, check } = setup({ [QUOTE]: route });
+    await check();
+    assert.match(el("quote-result").textContent, pattern);
+    assert.equal(el("change-submit").disabled, true);
+  }
+});
+
+// ---------- Gửi yêu cầu ----------
+
+test("Sending posts only the checked values and the description", async () => {
+  const { el, fetchFn, submit } = setup({ [CREATE]: response(201, request()) });
+  await submit("  Đổi vì công tác ");
+  assert.deepEqual(fetchFn.called(CREATE)[0].body, {
+    bookingId: 5, checkIn: "2030-12-10", checkOut: "2030-12-13", description: "Đổi vì công tác"
+  });
+  assert.match(el("change-status").textContent, /Đã gửi phiếu #9/);
+  assert.equal(el("change-description").value, "");
+  assert.equal(el("change-submit").disabled, true, "next request needs a new check");
+  assert.equal(fetchFn.called(REQUESTS).length, 2, "list refreshes");
+});
+
+test("Description is required, plain text and limited", async () => {
+  for (const [text, pattern] of [["  ", /Nhập mô tả/], ["a".repeat(4001), /4000/], ["<b>x</b>", /HTML/], ["a\u0000b", /ký tự/]]) {
+    const { el, fetchFn, submit } = setup();
+    await submit(text);
+    assert.match(el("change-status").textContent, pattern);
     assert.equal(fetchFn.called(CREATE).length, 0);
   }
 });
 
-test("Plain text with a less-than sign is allowed", async () => {
-  const { el, fetchFn, app, fill } = setup({ [CREATE]: response(201, ticket({ bookingId: null, subject: "Giá < 500000" })) });
-  await app.ready;
-  fill("Giá < 500000", "a < 5");
-  await el("create-form").fire("submit");
+test("A less-than sign in plain text is allowed", async () => {
+  const { fetchFn, submit } = setup({ [CREATE]: response(201, request()) });
+  await submit("Giá < 500000");
   assert.equal(fetchFn.called(CREATE).length, 1);
 });
 
-test("Create failures have specific messages and are not retried", async () => {
-  const cases = [
-    [response(400), /không hợp lệ/], [response(401), /hết hạn/], [response(403), /chưa được cấp/],
-    [response(404), /Booking không tồn tại/], [response(500), /HTTP 500/]
-  ];
+test("Send failures keep the text, explain, and are not retried", async () => {
+  const cases = [[response(400), /không hợp lệ/], [response(403), /chưa được cấp/], [response(404), /Không tìm thấy/], [response(409), /đang chờ duyệt, hoặc phòng vừa hết/], [response(503), /Chưa có phiếu nào/], [new Error("down"), /Không rõ phiếu/], [response(201, { id: 1 }), /chưa thể xác nhận/]];
   for (const [route, pattern] of cases) {
-    const { el, fetchFn, app, fill } = setup({ [CREATE]: route });
-    await app.ready;
-    fill();
-    await el("create-form").fire("submit");
-    assert.match(el("create-status").textContent, pattern);
+    const { el, fetchFn, submit } = setup({ [CREATE]: route });
+    await submit();
+    assert.match(el("change-status").textContent, pattern);
+    assert.equal(el("change-description").value, "Đổi vì công tác");
     assert.equal(fetchFn.called(CREATE).length, 1);
-    assert.equal(el("ticket-subject").value, "Cần hỗ trợ", "input is kept");
   }
 });
 
-test("Unknown create outcome warns against sending twice", async () => {
-  for (const route of [new Error("down"), response(201), response(201, { id: 9 })]) {
-    const { el, app, fill } = setup({ [CREATE]: route });
-    await app.ready;
-    fill();
-    await el("create-form").fire("submit");
-    assert.match(el("create-status").textContent, /Tải lại danh sách trước khi gửi lại/);
-  }
+test("A 409 requires checking rooms again", async () => {
+  const { el, submit } = setup({ [CREATE]: response(409) });
+  await submit();
+  assert.equal(el("change-submit").disabled, true);
+  assert.match(el("quote-result").textContent, /kiểm tra lại/);
 });
 
-test("Double submit creates one ticket and everything is locked until the response", async () => {
+test("Double submit sends one request and locks actions until the response", async () => {
   let release;
-  const { el, fetchFn, app, fill } = setup({ [CREATE]: () => new Promise(resolve => { release = resolve; }) });
-  await app.ready;
-  fill();
-  const first = el("create-form").fire("submit");
-  await el("create-form").fire("submit");
-  assert.equal(el("create-submit").disabled, true);
-  assert.equal(el("tickets-reload").disabled, true);
-  assert.equal(el("ticket-list").button("Xem").disabled, true);
+  const { el, fetchFn, check } = setup({ [CREATE]: () => new Promise(resolve => { release = resolve; }) });
+  await check();
+  el("change-description").value = "x";
+  const first = el("change-form").fire("submit");
+  await el("change-form").fire("submit");
+  assert.equal(el("change-submit").disabled, true);
+  assert.equal(el("check-button").disabled, true);
+  assert.equal(el("requests-reload").disabled, true);
   await tick();
   release(response(500));
   await first;
   assert.equal(fetchFn.called(CREATE).length, 1);
-  assert.equal(el("create-submit").disabled, false);
+  assert.equal(el("change-submit").disabled, false);
 });
 
-// ---------- Chi tiết ----------
+// ---------- Danh sách phiếu ----------
 
-test("Detail shows description and messages as text, not HTML", async () => {
-  const body = "<img src=x onerror=alert(1)>";
-  const { el, open } = setup({ [DETAIL]: response(200, detail({ messages: [message({ body })] })) });
-  await open();
-  assert.equal(el("ticket-detail").hidden, false);
-  assert.equal(el("detail-description").textContent, "Đổi giờ đến");
-  const paragraph = el("message-list").find(node => node.tag === "p");
-  assert.equal(paragraph.textContent, body);
-  assert.equal(paragraph.innerHTML, undefined);
-  assert.ok(el("message-list").textContent.includes("Khách hàng"));
+test("USER sees request details without decision buttons", async () => {
+  const { el, app } = setup({ [REQUESTS]: response(200, page([request()])) });
+  await app.ready;
+  const text = el("request-list").textContent;
+  for (const part of ["Phiếu #9", "Standard", "Chờ duyệt", "Booking #5", "2030-12-01 → 2030-12-03", "2030-12-10 → 2030-12-13", "Đổi vì công tác"]) {
+    assert.ok(text.includes(part), part);
+  }
+  assert.ok(!text.includes("Người gửi"));
+  assert.equal(el("request-list").button("Duyệt"), null);
 });
 
-test("Support replies are labelled and a ticket without messages says so", async () => {
-  const replied = setup({ [DETAIL]: response(200, detail({ messages: [message({ authorRole: "ADMIN" })] })) });
-  await replied.open();
-  assert.ok(replied.el("message-list").textContent.includes("Bộ phận hỗ trợ"));
-  const empty = setup();
-  await empty.open();
-  assert.equal(empty.el("detail-status").textContent, "Chưa có tin nhắn.");
+test("Decided requests show the reason and time", async () => {
+  const decided = request({ status: "REJECTED", decisionNote: "Bảo trì", decidedAt: "2030-11-04T07:00:00Z" });
+  const { el, app } = setup({ [REQUESTS]: response(200, page([decided])) });
+  await app.ready;
+  const text = el("request-list").textContent;
+  for (const part of ["Bị từ chối", "Lý do: Bảo trì", "Xử lý lúc"]) assert.ok(text.includes(part), part);
 });
 
-test("Detail errors do not leave an old ticket on screen", async () => {
-  const { el, open, app } = setup({ [DETAIL]: [response(200, detail({ messages: [message()] })), response(404)] });
-  await open();
-  await app.openTicket(9, true);
-  assert.equal(el("detail-status").textContent, "Ticket không tồn tại hoặc không thuộc phạm vi truy cập.");
-  assert.equal(el("message-list").children.length, 0);
-  assert.equal(el("reply-form").hidden, true);
-  assert.equal(el("detail-description").textContent, "");
+test("Text is rendered as text, not HTML", async () => {
+  const description = "<img src=x onerror=alert(1)>";
+  const { el, app } = setup({ [REQUESTS]: response(200, page([request({ description })])) });
+  await app.ready;
+  const node = el("request-list").find(item => item.textContent === description);
+  assert.ok(node);
+  assert.equal(node.innerHTML, undefined);
 });
 
-test("Message belonging to another ticket makes the detail invalid", async () => {
-  const { el, open } = setup({ [DETAIL]: response(200, detail({ messages: [message({ ticketId: 99 })] })) });
-  await open();
-  assert.match(el("detail-status").textContent, /không hợp lệ/);
+test("A request from another tenant blocks the whole list", async () => {
+  const { el, app } = setup({ [REQUESTS]: response(200, page([request(), request({ id: 10, tenantId: 2 })])) });
+  await app.ready;
+  assert.equal(el("request-list").children.length, 0);
+  assert.match(el("requests-status").textContent, /không hợp lệ/);
 });
 
-test("A slow detail answer is ignored once another ticket is opened", async () => {
+test("ADMIN queue starts from the selected filter and can change it", async () => {
+  const { el, fetchFn, doc } = (() => {
+    const doc = new FakeDocument("app3");
+    doc.getElementById("status-filter").value = "PENDING";
+    const fetchFn = fakeFetch({ [REQUESTS]: response(200, page([request()])) });
+    const app = initSupport(doc, fakeAuth("ADMIN"), fetchFn, fakeTimers());
+    return { el: id => doc.getElementById(id), fetchFn, doc, app };
+  })();
+  await tick();
+  assert.match(fetchFn.called(REQUESTS)[0].url, /status=PENDING/);
+  el("status-filter").value = "";
+  await el("status-filter").fire("change");
+  await tick();
+  assert.doesNotMatch(fetchFn.called(REQUESTS)[1].url, /status=/);
+  assert.ok(doc);
+});
+
+test("Pager moves between pages and stops at the ends", async () => {
+  const first = response(200, page([request()], { totalElements: 11, totalPages: 2 }));
+  const second = response(200, page([request({ id: 8 })], { page: 1, totalElements: 11, totalPages: 2 }));
+  const { el, fetchFn, app } = setup({ [REQUESTS]: [first, second, first] });
+  await app.ready;
+  assert.equal(el("prev-page").disabled, true);
+  assert.equal(el("page-info").textContent, "Trang 1/2");
+  await el("next-page").fire("click");
+  await tick();
+  assert.match(fetchFn.called(REQUESTS)[1].url, /page=1&size=10/);
+  assert.equal(el("next-page").disabled, true);
+  await el("prev-page").fire("click");
+  await tick();
+  assert.match(fetchFn.called(REQUESTS)[2].url, /page=0&size=10/);
+});
+
+// ---------- Duyệt và từ chối ----------
+
+function adminWith(routes) {
+  return setup({ [REQUESTS]: response(200, page([request()])), ...routes }, "ADMIN");
+}
+
+test("ADMIN sees the requester and decision buttons only while pending", async () => {
+  const pending = adminWith({});
+  await pending.app.ready;
+  assert.ok(pending.el("request-list").textContent.includes("Người gửi: user@example.test"));
+  assert.ok(pending.el("request-list").button("Duyệt"));
+  assert.ok(pending.el("request-list").button("Từ chối"));
+
+  const decided = adminWith({ [REQUESTS]: response(200, page([request({ status: "APPROVED", decidedAt: "2030-11-04T07:00:00Z" })])) });
+  await decided.app.ready;
+  assert.equal(decided.el("request-list").button("Duyệt"), null);
+});
+
+test("Approve calls the API and refreshes the list", async () => {
+  const { el, fetchFn, app } = adminWith({ [APPROVE]: response(200, request({ status: "APPROVED", decidedAt: "2030-11-04T07:00:00Z" })) });
+  await app.ready;
+  await el("request-list").button("Duyệt").fire("click");
+  await tick();
+  assert.equal(fetchFn.called(APPROVE).length, 1);
+  assert.equal(fetchFn.called(APPROVE)[0].body, undefined);
+  assert.match(el("decision-status").textContent, /Đã duyệt phiếu #9/);
+  assert.equal(fetchFn.called(REQUESTS).length, 2);
+});
+
+test("Reject sends the trimmed reason, or no body without one", async () => {
+  const decided = response(200, request({ status: "REJECTED", decidedAt: "2030-11-04T07:00:00Z" }));
+  const withReason = adminWith({ [REJECT]: decided });
+  await withReason.app.ready;
+  withReason.el("request-list").find(node => node.tag === "input").value = "  Bảo trì ";
+  await withReason.el("request-list").button("Từ chối").fire("click");
+  await tick();
+  assert.deepEqual(withReason.fetchFn.called(REJECT)[0].body, { note: "Bảo trì" });
+  assert.match(withReason.el("decision-status").textContent, /Đã từ chối phiếu #9/);
+
+  const withoutReason = adminWith({ [REJECT]: decided });
+  await withoutReason.app.ready;
+  await withoutReason.el("request-list").button("Từ chối").fire("click");
+  await tick();
+  assert.equal(withoutReason.fetchFn.called(REJECT)[0].body, undefined);
+});
+
+test("Invalid reason never reaches the API", async () => {
+  for (const [note, pattern] of [["<b>x", /HTML/], ["a".repeat(1001), /1000/]]) {
+    const { el, fetchFn, app } = adminWith({});
+    await app.ready;
+    el("request-list").find(node => node.tag === "input").value = note;
+    await el("request-list").button("Từ chối").fire("click");
+    assert.match(el("decision-status").textContent, pattern);
+    assert.equal(fetchFn.called(REJECT).length, 0);
+  }
+});
+
+test("Approval failures explain that the booking did not change", async () => {
+  const cases = [[response(409), /đã hết phòng.*chưa đổi/], [response(503), /vẫn chờ duyệt/], [response(403), /không có quyền/], [response(404), /không tồn tại/], [new Error("down"), /Không rõ kết quả/], [response(200, request()), /chưa thể xác nhận/]];
+  for (const [route, pattern] of cases) {
+    const { el, fetchFn, app } = adminWith({ [APPROVE]: route });
+    await app.ready;
+    await el("request-list").button("Duyệt").fire("click");
+    await tick();
+    assert.match(el("decision-status").textContent, pattern);
+    assert.equal(fetchFn.called(APPROVE).length, 1);
+  }
+});
+
+test("Double click decides once and locks the other buttons", async () => {
   let release;
-  const { el, app } = setup({
-    "GET /api/support/tickets/1": () => new Promise(resolve => { release = resolve; }),
-    [DETAIL]: response(200, detail())
+  const { el, fetchFn, app } = adminWith({ [APPROVE]: () => new Promise(resolve => { release = resolve; }) });
+  await app.ready;
+  const approve = el("request-list").button("Duyệt");
+  const reject = el("request-list").button("Từ chối");
+  const first = approve.fire("click");
+  await approve.fire("click");
+  await reject.fire("click");
+  assert.equal(approve.disabled, true);
+  assert.equal(reject.disabled, true);
+  await tick();
+  release(response(409));
+  await first;
+  await tick();
+  assert.equal(fetchFn.called(APPROVE).length, 1);
+  assert.equal(fetchFn.called(REJECT).length, 0);
+});
+
+// ---------- Thông báo ----------
+
+test("Notifications show content, unread count and a read action", async () => {
+  const { el, app } = setup({ [NOTIFICATIONS]: response(200, inbox([notification(), notification({ id: 2, readAt: "2030-11-04T06:30:00Z" })])) });
+  await app.ready;
+  assert.equal(el("notification-count").textContent, "1 chưa đọc");
+  const text = el("notification-list").textContent;
+  for (const part of ["đã được duyệt", "Booking #5"]) assert.ok(text.includes(part), part);
+  assert.equal(el("notification-list").buttons("Đánh dấu đã đọc").length, 1);
+});
+
+test("Empty notifications say so", async () => {
+  const { el, app } = setup();
+  await app.ready;
+  assert.equal(el("notification-status").textContent, "Chưa có thông báo.");
+  assert.equal(el("notification-count").textContent, "");
+});
+
+test("Marking as read posts and refreshes the count", async () => {
+  const { el, fetchFn, app } = setup({
+    [NOTIFICATIONS]: [response(200, inbox([notification()])), response(200, inbox([notification({ readAt: "2030-11-04T06:30:00Z" })]))],
+    "POST /api/notifications/3/read": response(200, notification({ readAt: "2030-11-04T06:30:00Z" }))
   });
   await app.ready;
-  const slow = app.openTicket(1, true);
+  await el("notification-list").button("Đánh dấu đã đọc").fire("click");
   await tick();
-  await app.openTicket(9, true);
-  release(response(200, detail({ id: 1, subject: "Ticket cũ" })));
-  await slow;
-  assert.ok(el("detail-title").textContent.startsWith("#9"));
+  assert.equal(fetchFn.called("POST /api/notifications/3/read").length, 1);
+  assert.equal(el("notification-count").textContent, "");
 });
 
-// ---------- Trả lời ----------
-
-test("Reply sends only the body and refreshes ticket and list", async () => {
-  const { el, fetchFn, open } = setup({ [REPLY]: response(201, message()) });
-  await open();
-  el("reply-body").value = "  Tôi đến lúc 20 giờ. ";
-  await el("reply-form").fire("submit");
-  assert.deepEqual(fetchFn.called(REPLY)[0].body, { body: "Tôi đến lúc 20 giờ." });
-  assert.equal(el("reply-status").textContent, "Đã gửi tin nhắn.");
-  assert.equal(el("reply-body").value, "");
-  assert.equal(fetchFn.called(DETAIL).length, 2);
-  assert.equal(fetchFn.called(LIST).length, 2);
+test("Polling shows a new notification and refreshes requests and bookings", async () => {
+  const { el, fetchFn, app } = setup({
+    [NOTIFICATIONS]: [response(200, inbox([])), response(200, inbox([notification()]))]
+  });
+  await app.ready;
+  await app.poll();
+  assert.ok(el("notification-list").textContent.includes("đã được duyệt"));
+  assert.equal(fetchFn.called(REQUESTS).length, 2);
+  assert.equal(fetchFn.called(BOOKINGS).length, 2);
 });
 
-test("Invalid reply never reaches the API", async () => {
-  for (const [value, pattern] of [["  ", /Nhập nội dung/], ["a".repeat(4001), /4000/], ["<b>x", /HTML/]]) {
-    const { el, fetchFn, open } = setup();
-    await open();
-    el("reply-body").value = value;
-    await el("reply-form").fire("submit");
-    assert.match(el("reply-status").textContent, pattern);
-    assert.equal(fetchFn.called(REPLY).length, 0);
-  }
+test("Polling without anything new does not reload the rest", async () => {
+  const { fetchFn, app } = setup({ [NOTIFICATIONS]: response(200, inbox([notification()])) });
+  await app.ready;
+  await app.poll();
+  assert.equal(fetchFn.called(REQUESTS).length, 1);
+  assert.equal(fetchFn.called(BOOKINGS).length, 1);
 });
 
-test("Reply failures keep the text and explain what happened", async () => {
-  const cases = [
-    [response(409), /đã đóng/], [response(404), /không tồn tại/], [response(403), /không có quyền/],
-    [new Error("down"), /Không rõ tin nhắn/], [response(201, { id: 1 }), /chưa thể xác nhận/]
-  ];
-  for (const [route, pattern] of cases) {
-    const { el, fetchFn, open } = setup({ [REPLY]: route });
-    await open();
-    el("reply-body").value = "Xin chào";
-    await el("reply-form").fire("submit");
-    assert.match(el("reply-status").textContent, pattern);
-    assert.equal(el("reply-body").value, "Xin chào");
-    assert.equal(fetchFn.called(REPLY).length, 1);
-  }
+test("A notification failure does not block the rest of the page", async () => {
+  const { el, app } = setup({ [NOTIFICATIONS]: new Error("down"), [REQUESTS]: response(200, page([request()])) });
+  await app.ready;
+  assert.match(el("notification-status").textContent, /sẽ thử lại/);
+  assert.ok(el("request-list").textContent.includes("Phiếu #9"));
 });
 
-test("Expired session on reply makes no further requests", async () => {
-  const { el, fetchFn, open } = setup({ [REPLY]: response(401) });
-  await open();
-  const before = fetchFn.calls.length;
-  el("reply-body").value = "x";
-  await el("reply-form").fire("submit");
-  assert.equal(el("reply-status").textContent, api.sessionExpired);
-  assert.equal(fetchFn.calls.length, before + 1);
+test("Text in notifications is rendered as text", async () => {
+  const body = "<img src=x onerror=alert(1)>";
+  const { el, app } = setup({ [NOTIFICATIONS]: response(200, inbox([notification({ body })])) });
+  await app.ready;
+  assert.equal(el("notification-list").find(node => node.tag === "p").textContent, body);
 });
 
-test("Double submit sends one reply", async () => {
-  let release;
-  const { el, fetchFn, open } = setup({ [REPLY]: () => new Promise(resolve => { release = resolve; }) });
-  await open();
-  el("reply-body").value = "x";
-  const first = el("reply-form").fire("submit");
-  await el("reply-form").fire("submit");
-  assert.equal(el("reply-submit").disabled, true);
-  await tick();
-  release(response(201, message()));
-  await first;
-  assert.equal(fetchFn.called(REPLY).length, 1);
-});
+// ---------- Validators ----------
 
-test("Closed ticket hides the reply form and status action", async () => {
-  const closed = detail({ status: "CLOSED", closedAt: "2026-11-04T06:00:00Z" });
-  const { el, open } = setup({ [DETAIL]: response(200, closed), [LIST]: response(200, page([ticket({ status: "CLOSED", closedAt: "2026-11-04T06:00:00Z" })])) }, "ADMIN");
-  await open();
-  assert.equal(el("reply-form").hidden, true);
-  assert.equal(el("status-actions").hidden, true);
-  assert.match(el("detail-status").textContent, /đã đóng/);
-  assert.ok(el("detail-meta").textContent.includes("Đóng lúc"));
-});
-
-// ---------- Trạng thái ----------
-
-test("USER never sees the status action", async () => {
-  const { el, open } = setup();
-  await open();
-  assert.equal(el("status-actions").hidden, true);
-});
-
-test("ADMIN only gets the next valid step for each status", async () => {
-  for (const [status, label] of [["OPEN", "Bắt đầu xử lý"], ["IN_PROGRESS", "Đánh dấu đã giải quyết"], ["RESOLVED", "Đóng ticket"]]) {
-    const { el, open } = setup({ [DETAIL]: response(200, detail({ status })) }, "ADMIN");
-    await open();
-    assert.equal(el("status-actions").hidden, false);
-    assert.equal(el("status-button").textContent, label);
-  }
-});
-
-test("Advancing status patches the next value and refreshes", async () => {
-  const { el, fetchFn, open } = setup({
-    [STATUS]: response(200, ticket({ status: "IN_PROGRESS" })),
-    [DETAIL]: [response(200, detail()), response(200, detail({ status: "IN_PROGRESS" }))]
-  }, "ADMIN");
-  await open();
-  await el("status-button").fire("click");
-  await tick();
-  assert.deepEqual(fetchFn.called(STATUS)[0].body, { status: "IN_PROGRESS" });
-  assert.match(el("reply-status").textContent, /Đang xử lý/);
-  assert.equal(el("status-button").textContent, "Đánh dấu đã giải quyết");
-});
-
-test("Status conflict explains and shows the current state", async () => {
-  const { el, open } = setup({
-    [STATUS]: response(409),
-    [DETAIL]: [response(200, detail()), response(200, detail({ status: "RESOLVED" }))]
-  }, "ADMIN");
-  await open();
-  await el("status-button").fire("click");
-  await tick();
-  assert.match(el("reply-status").textContent, /vừa thay đổi/);
-  assert.equal(el("status-button").textContent, "Đóng ticket");
-});
-
-test("Unconfirmed status response is not reported as saved", async () => {
-  const { el, open } = setup({ [STATUS]: response(200, ticket({ status: "OPEN" })) }, "ADMIN");
-  await open();
-  await el("status-button").fire("click");
-  await tick();
-  assert.match(el("reply-status").textContent, /chưa thể xác nhận/);
-});
-
-test("Double click changes status once and locks replies", async () => {
-  let release;
-  const { el, fetchFn, open } = setup({ [STATUS]: () => new Promise(resolve => { release = resolve; }) }, "ADMIN");
-  await open();
-  el("status-button").fire("click");
-  await el("status-button").fire("click");
-  assert.equal(el("status-button").disabled, true);
-  assert.equal(el("reply-submit").disabled, true);
-  await tick();
-  release(response(500));
-  await tick();
-  assert.equal(fetchFn.called(STATUS).length, 1);
-  assert.equal(el("status-button").disabled, false);
-});
-
-// ---------- API client ----------
-
-test("Client supports PATCH with a JSON body", async () => {
-  const fetchFn = fakeFetch({ "PATCH /api/x": response(200, {}) });
-  await api.createClient({ fetchFn, auth: fakeAuth() }).patch("/x", { a: 1 });
-  assert.equal(fetchFn.calls[0].init.method, "PATCH");
-  assert.deepEqual(fetchFn.calls[0].body, { a: 1 });
-});
-
-test("Ticket validators reject wrong tenant, status and shapes", () => {
-  assert.equal(api.isTicket(ticket(), 1), true);
-  assert.equal(api.isTicket(ticket(), 2), false);
-  assert.equal(api.isTicket(ticket({ status: "DONE" }), 1), false);
-  assert.equal(api.isTicket(ticket({ bookingId: "5" }), 1), false);
-  assert.equal(api.isTicket(ticket({ closedAt: "hôm qua" }), 1), false);
-  assert.equal(api.isMessage(message({ authorRole: "ROOT" })), false);
-  assert.equal(api.isTicketPage({ items: [] }), false);
+test("Validators reject wrong tenant, status and shapes", () => {
+  assert.equal(api.isDateChangeRequest(request(), 1), true);
+  assert.equal(api.isDateChangeRequest(request(), 2), false);
+  assert.equal(api.isDateChangeRequest(request({ status: "DONE" }), 1), false);
+  assert.equal(api.isDateChangeRequest(request({ requestedCheckIn: "2030-12-10T00:00:00Z" }), 1), false);
+  assert.equal(api.isDateChangeRequest(request({ decidedAt: "hôm qua" }), 1), false);
+  assert.equal(api.isQuote(quote()), true);
+  assert.equal(api.isQuote(quote({ available: "yes" })), false);
+  assert.equal(api.isReschedulable(booking({ roomTypeName: "" })), false);
+  assert.equal(api.isNotification(notification({ readAt: 5 })), false);
+  assert.equal(api.isPage({ items: [] }), false);
 });

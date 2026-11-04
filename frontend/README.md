@@ -21,7 +21,7 @@ Mở `http://localhost:3000/` (App 1), `http://localhost:3001/` (App 2) và `htt
 - **ADMIN:** xem tồn kho theo đêm, thêm loại phòng và sửa giá cho khách sạn đang chọn. Danh sách loại phòng để sửa giá lấy từ tồn kho đã tải, vì contract không có API liệt kê loại phòng.
 - **Lỗi:** giao diện chỉ dựa vào HTTP status, không đọc `detail`. 401 ở bất kỳ API nào sẽ báo đăng nhập lại. Khi mất kết nối lúc ghi, giao diện báo chưa rõ kết quả thay vì coi là thất bại.
 
-- **Support Center (`:3002`):** ứng dụng riêng, đăng nhập qua cùng IAM nên có phiên rồi thì không phải nhập lại mật khẩu. USER tạo ticket, có thể gắn booking của mình, và trả lời ticket của mình. ADMIN xem ticket trong tenant, trả lời và đổi trạng thái theo đúng bước kế tiếp. Xem API ở `backend/support-service/README.md`.
+- **Support Center (`:3002`):** ứng dụng riêng, đăng nhập qua cùng IAM nên có phiên rồi thì không phải nhập lại mật khẩu. USER chọn đơn đã thanh toán, chọn ngày mới, kiểm tra còn phòng, nhập mô tả rồi gửi phiếu; kết quả được báo qua thông báo trong trang, tự cập nhật sau mỗi 15 giây. ADMIN xem phiếu trong tenant và duyệt hoặc từ chối. Xem `backend/support-service/README.md` và `backend/notification-service/README.md`.
 
 ## Kiểm tra local
 

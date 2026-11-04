@@ -93,22 +93,28 @@
     && isMoney(value.totalAmount) && bookingStatuses.includes(value.status)
     && isUtcTime(value.paymentExpiresAt) && isUtcTime(value.createdAt);
 
-  const ticketStatuses = ["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"];
+  const dateChangeStatuses = ["PENDING", "APPROVED", "REJECTED"];
 
-  const isTicket = (value, tenantId) => Boolean(value) && isPositiveId(value.id) && value.tenantId === tenantId
-    && (value.bookingId === null || isPositiveId(value.bookingId)) && isText(value.requesterEmail)
-    && isText(value.subject) && isText(value.description) && ticketStatuses.includes(value.status)
-    && isUtcTime(value.createdAt) && isUtcTime(value.updatedAt)
-    && (value.closedAt === null || isUtcTime(value.closedAt));
+  const isReschedulable = value => Boolean(value) && isPositiveId(value.id) && isPositiveId(value.roomTypeId)
+    && isText(value.roomTypeName) && isText(value.hotelName) && isStayDate(value.checkIn) && isStayDate(value.checkOut)
+    && isPositiveId(value.roomCount) && isMoney(value.totalAmount);
 
-  const isMessage = value => Boolean(value) && isPositiveId(value.id) && isPositiveId(value.ticketId)
-    && isPositiveId(value.authorUserId) && ["USER", "ADMIN"].includes(value.authorRole)
-    && isText(value.body) && isUtcTime(value.createdAt);
+  const isQuote = value => Boolean(value) && isPositiveId(value.bookingId) && isText(value.roomTypeName)
+    && isStayDate(value.checkIn) && isStayDate(value.checkOut) && isPositiveId(value.nights) && isPositiveId(value.roomCount)
+    && isMoney(value.currentTotalAmount) && isMoney(value.newTotalAmount) && typeof value.available === "boolean";
 
-  const isTicketDetail = (value, tenantId) => isTicket(value, tenantId) && Array.isArray(value.messages)
-    && value.messages.every(message => isMessage(message) && message.ticketId === value.id);
+  const isDateChangeRequest = (value, tenantId) => Boolean(value) && isPositiveId(value.id) && value.tenantId === tenantId
+    && isPositiveId(value.bookingId) && isText(value.requesterEmail) && isText(value.roomTypeName) && isPositiveId(value.roomCount)
+    && isStayDate(value.currentCheckIn) && isStayDate(value.currentCheckOut)
+    && isStayDate(value.requestedCheckIn) && isStayDate(value.requestedCheckOut)
+    && isMoney(value.currentTotalAmount) && isMoney(value.newTotalAmount) && isText(value.description)
+    && dateChangeStatuses.includes(value.status) && (value.decisionNote === null || isText(value.decisionNote))
+    && (value.decidedAt === null || isUtcTime(value.decidedAt)) && isUtcTime(value.createdAt);
 
-  const isTicketPage = value => Boolean(value) && Array.isArray(value.items)
+  const isNotification = value => Boolean(value) && isPositiveId(value.id) && isText(value.type) && isText(value.title)
+    && isText(value.body) && (value.readAt === null || isUtcTime(value.readAt)) && isUtcTime(value.createdAt);
+
+  const isPage = value => Boolean(value) && Array.isArray(value.items)
     && isCount(value.page) && isPositiveId(value.size) && isCount(value.totalElements) && isCount(value.totalPages);
 
   // Khớp quy tắc của support-service để báo lỗi rõ hơn; backend vẫn là nơi quyết định.
@@ -118,21 +124,16 @@
     return null;
   }
 
-  function validateNewTicket(subject, description) {
-    const title = String(subject).trim();
-    const content = String(description).trim();
-    if (!title) return "Nhập tiêu đề.";
-    if (title.length > 200) return "Tiêu đề không được quá 200 ký tự.";
-    if (/[\r\n]/.test(title)) return "Tiêu đề chỉ được có một dòng.";
-    if (!content) return "Nhập nội dung.";
-    if (content.length > 4000) return "Nội dung không được quá 4000 ký tự.";
-    return textProblem(title) || textProblem(content);
+  function validateDescription(description) {
+    const text = String(description).trim();
+    if (!text) return "Nhập mô tả.";
+    if (text.length > 4000) return "Mô tả không được quá 4000 ký tự.";
+    return textProblem(text);
   }
 
-  function validateMessage(body) {
-    const text = String(body).trim();
-    if (!text) return "Nhập nội dung trả lời.";
-    if (text.length > 4000) return "Nội dung không được quá 4000 ký tự.";
+  function validateNote(note) {
+    const text = String(note).trim();
+    if (text.length > 1000) return "Lý do không được quá 1000 ký tự.";
     return textProblem(text);
   }
 
@@ -163,8 +164,7 @@
     return Object.freeze({
       get: path => send("GET", path),
       post: (path, body) => send("POST", path, body),
-      put: (path, body) => send("PUT", path, body),
-      patch: (path, body) => send("PATCH", path, body)
+      put: (path, body) => send("PUT", path, body)
     });
   }
 
@@ -194,7 +194,7 @@
   const api = Object.freeze({
     createClient, describeFailure, validateStay, validatePrice, validateNewRoomType, validateIntegerInRange,
     todayInVietnam, isHotel, isAvailability, isRoomType, isInventoryRow, isBooking,
-    isTicket, isMessage, isTicketDetail, isTicketPage, validateNewTicket, validateMessage,
+    isReschedulable, isQuote, isDateChangeRequest, isNotification, isPage, validateDescription, validateNote,
     formatMoney, formatTime, element, sessionExpired
   });
 

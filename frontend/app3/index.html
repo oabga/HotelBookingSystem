@@ -20,8 +20,8 @@
       <section class="hero" aria-labelledby="page-title">
         <div>
           <span class="eyebrow">Support Center</span>
-          <h1 id="page-title">Hỗ trợ trước và sau khi đặt phòng.</h1>
-          <p>Gửi yêu cầu, gắn với booking của bạn và trao đổi với bộ phận hỗ trợ. Đã đăng nhập ở ứng dụng khác thì không cần nhập lại mật khẩu.</p>
+          <h1 id="page-title">Xin đổi ngày thuê phòng.</h1>
+          <p>Chọn đơn đã đặt và ngày muốn đổi, rồi gửi yêu cầu. Bạn sẽ nhận thông báo khi yêu cầu được duyệt hoặc từ chối. Đã đăng nhập ở ứng dụng khác thì không cần nhập lại mật khẩu.</p>
         </div>
         <div class="login-card">
           <h2>Phiên đăng nhập</h2>
@@ -36,71 +36,71 @@
         <div class="account-item"><span>Role từ JWT</span><strong id="user-role">Chưa xác định</strong></div>
         <div class="account-item"><span>Tenant từ JWT</span><strong id="user-tenant">Chưa xác định</strong></div>
       </div>
-      <p class="status" id="integration-status">Ticket cần JWT.</p>
+      <p class="status" id="integration-status">Yêu cầu đổi ngày cần JWT.</p>
+
+      <section id="notification-panel" class="section" aria-labelledby="notification-title" hidden>
+        <div class="section-heading">
+          <div><span class="eyebrow">Thông báo</span><h2 id="notification-title">Thông báo của tôi <span id="notification-count" class="pill pill-pending"></span></h2></div>
+          <p>Kết quả xử lý yêu cầu sẽ hiện ở đây, trang tự cập nhật sau mỗi 15 giây.</p>
+        </div>
+        <p id="notification-status" class="status" role="status"></p>
+        <ul id="notification-list" class="message-list" aria-label="Danh sách thông báo"></ul>
+      </section>
 
       <section id="create-panel" class="section" aria-labelledby="create-title" hidden>
         <div class="section-heading">
-          <div><span class="eyebrow">Yêu cầu mới</span><h2 id="create-title">Tạo ticket</h2></div>
-          <p>Có thể gắn với một booking của bạn hoặc để trống nếu là câu hỏi chung.</p>
+          <div><span class="eyebrow">Yêu cầu mới</span><h2 id="create-title">Xin đổi ngày</h2></div>
+          <p>Chỉ đổi được đơn đã thanh toán và chưa tới ngày nhận phòng. Phòng chưa được giữ cho tới khi yêu cầu được duyệt.</p>
         </div>
         <div class="panel">
-          <form id="create-form" novalidate>
+          <form id="change-form" novalidate>
             <div class="form-grid">
-              <label class="field full" for="ticket-booking">Booking liên quan<select id="ticket-booking"><option value="">Không gắn booking</option></select></label>
-              <label class="field full" for="ticket-subject">Tiêu đề<input id="ticket-subject" type="text" maxlength="200" autocomplete="off"></label>
-              <label class="field full" for="ticket-description">Nội dung<textarea id="ticket-description" rows="4" maxlength="4000"></textarea></label>
+              <label class="field full" for="change-booking">Loại phòng đã đặt<select id="change-booking"><option value="">Chọn đơn đã đặt</option></select></label>
+              <label class="field" for="change-check-in">Ngày nhận phòng mới<input id="change-check-in" type="date"></label>
+              <label class="field" for="change-check-out">Ngày trả phòng mới<input id="change-check-out" type="date"></label>
             </div>
-            <button id="create-submit" class="action-button" type="submit">Gửi yêu cầu</button>
+            <button id="check-button" class="action-button secondary-button" type="button">Kiểm tra còn phòng</button>
+            <p id="quote-result" class="feedback" role="status"></p>
+            <div class="form-grid">
+              <label class="field full" for="change-description">Mô tả<textarea id="change-description" rows="3" maxlength="4000"></textarea></label>
+            </div>
+            <button id="change-submit" class="action-button" type="submit" disabled>Gửi yêu cầu</button>
           </form>
-          <p id="create-status" class="feedback" role="status"></p>
+          <p id="change-status" class="feedback" role="status"></p>
           <p id="bookings-note" class="note" role="status"></p>
         </div>
       </section>
 
-      <section class="section" aria-labelledby="tickets-title">
+      <section class="section" aria-labelledby="requests-title">
         <div class="section-heading">
-          <div><span class="eyebrow">Ticket</span><h2 id="tickets-title">Ticket</h2></div>
-          <p id="tickets-note">Đăng nhập để xem ticket.</p>
+          <div><span class="eyebrow">Phiếu yêu cầu</span><h2 id="requests-title">Phiếu yêu cầu</h2></div>
+          <p id="requests-note">Đăng nhập để xem phiếu yêu cầu.</p>
         </div>
         <div class="list-toolbar">
-          <p id="tickets-status" class="status" role="status">Đăng nhập để xem ticket.</p>
-          <button id="tickets-reload" class="action-button small-button ghost-button" type="button" disabled>Tải lại</button>
+          <p id="requests-status" class="status" role="status">Đăng nhập để xem phiếu yêu cầu.</p>
+          <div class="toolbar-actions">
+            <label id="filter-wrap" class="field inline-field" for="status-filter" hidden>Trạng thái
+              <select id="status-filter">
+                <option value="PENDING">Chờ duyệt</option>
+                <option value="">Tất cả</option>
+                <option value="APPROVED">Đã duyệt</option>
+                <option value="REJECTED">Bị từ chối</option>
+              </select>
+            </label>
+            <button id="requests-reload" class="action-button small-button ghost-button" type="button" disabled>Tải lại</button>
+          </div>
         </div>
-        <ul id="ticket-list" class="ticket-list" aria-label="Danh sách ticket"></ul>
+        <p id="decision-status" class="feedback" role="status"></p>
+        <ul id="request-list" class="ticket-list" aria-label="Danh sách phiếu yêu cầu"></ul>
         <div class="pager">
           <button id="prev-page" class="action-button small-button ghost-button" type="button" disabled>Trang trước</button>
           <span id="page-info" class="note"></span>
           <button id="next-page" class="action-button small-button ghost-button" type="button" disabled>Trang sau</button>
         </div>
       </section>
-
-      <section id="ticket-detail" class="section" aria-labelledby="detail-title" hidden>
-        <div class="panel">
-          <div class="card-head">
-            <h2 id="detail-title" class="detail-title"></h2>
-            <span id="detail-status-pill" class="pill"></span>
-          </div>
-          <p id="detail-meta" class="note"></p>
-          <p id="detail-description" class="ticket-text"></p>
-
-          <h3>Trao đổi</h3>
-          <ul id="message-list" class="message-list" aria-label="Tin nhắn"></ul>
-          <p id="detail-status" class="feedback" role="status"></p>
-
-          <form id="reply-form" novalidate>
-            <label class="field" for="reply-body">Trả lời<textarea id="reply-body" rows="3" maxlength="4000"></textarea></label>
-            <button id="reply-submit" class="action-button" type="submit">Gửi trả lời</button>
-          </form>
-          <p id="reply-status" class="feedback" role="status"></p>
-
-          <div id="status-actions" class="card-actions" hidden>
-            <button id="status-button" class="action-button secondary-button" type="button"></button>
-          </div>
-        </div>
-      </section>
     </main>
 
-    <footer class="footer-note">StayHub demo · Claims ở frontend chỉ phục vụ hiển thị; backend xác minh quyền và quyết định kết quả. Tin nhắn đã gửi không sửa hoặc xoá được.</footer>
+    <footer class="footer-note">StayHub demo · Claims ở frontend chỉ phục vụ hiển thị; backend xác minh quyền và quyết định kết quả.</footer>
   </div>
 </body>
 </html>
