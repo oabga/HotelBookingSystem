@@ -1,0 +1,23 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: notification-service
+  datasource:
+    url: jdbc:postgresql://localhost:5432/notification_db
+    username: hotelbooking
+    password: hotelbooking
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    locations: classpath:db/migration
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Ngoài scope docs/iam-google-sso-demo-plan-v2.md (đã bỏ notification-service) —
+          # chỉ sửa cho khỏi trỏ vào Keycloak đã xóa, module này hiện không được build/chạy trong demo.
+          jwk-set-uri: http://localhost:8084/.well-known/jwks.json
