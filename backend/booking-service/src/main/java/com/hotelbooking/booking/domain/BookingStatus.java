@@ -1,6 +1,9 @@
 package com.hotelbooking.booking.domain;
 
-/** MVP chỉ có một trạng thái: đặt được phòng thì xác nhận ngay. */
+/** PENDING_PAYMENT và CONFIRMED đang giữ tồn; CANCELLED và EXPIRED đã trả tồn. */
 public enum BookingStatus {
-    CONFIRMED
+    PENDING_PAYMENT,
+    CONFIRMED,
+    CANCELLED,
+    EXPIRED
 }

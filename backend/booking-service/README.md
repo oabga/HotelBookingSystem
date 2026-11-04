@@ -1,12 +1,15 @@
 # booking-service
 
-Service tạo và xem booking, cổng `8082`, owner Phúc (C). Hợp đồng API nằm ở [api-contract.md §5](../docs/api-contract.md), thiết kế dữ liệu ở [erd-v2.md](../docs/erd-v2.md), sơ đồ ở [sequence-booking.md](../docs/sequence-booking.md), quy tắc nghiệp vụ ở [booking-policy.md](../docs/booking-policy.md).
+Service đặt, xem, thanh toán mô phỏng và huỷ booking, cổng `8082`, owner Phúc (C). Hợp đồng API nằm ở [api-contract.md §5](../docs/api-contract.md), thiết kế dữ liệu ở [erd-v2.md](../docs/erd-v2.md), sơ đồ ở [sequence-booking.md](../docs/sequence-booking.md), quy tắc nghiệp vụ ở [booking-policy.md](../docs/booking-policy.md).
 
 ## Chạy local
 
-Cần JDK 21 và PostgreSQL với database chung `hotelbooking`. Phải chạy migration theo thứ tự IAM → Catalog → Booking, vì bảng `booking` có FK sang `tenant`, `room` và `app_user`. Nếu chạy Booking trước trên DB trống, migration sẽ báo lỗi thiếu bảng.
+Cần JDK 21 và PostgreSQL với database chung `hotelbooking`. Phải chạy migration theo thứ tự IAM → Catalog → Booking, vì bảng `booking` có FK sang `tenant`, `app_user` và `room_type`. Nếu chạy Booking trước trên DB trống, migration sẽ báo lỗi thiếu bảng.
+
+Các lệnh chạy từ thư mục `backend/`. DB tạo trước khi chuyển sang schema `room_inventory` phải dựng lại (ERD §11). `docker compose down -v` xoá toàn bộ dữ liệu local:
 
 ```powershell
+docker compose down -v
 docker compose up -d postgres
 .\gradlew.bat :iam-service:bootRun
 .\gradlew.bat :catalog-service:bootRun
@@ -14,6 +17,17 @@ docker compose up -d postgres
 ```
 
 Tài khoản demo được thêm bằng `docker/seed/seed-app-users.example.sql`. Xem hướng dẫn ở đầu file đó. Để gọi được API, IAM phải đang chạy ở `:8084` để phát JWKS.
+
+| Cấu hình trong `application.yml` | Mặc định | Ý nghĩa |
+| --- | --- | --- |
+| `booking.payment.hold` | `PT15M` | Thời gian giữ phòng chờ thanh toán |
+| `booking.expiry.interval` | `PT60S` | Chu kỳ job đổi đơn quá hạn sang `EXPIRED` và trả tồn |
+
+Khi demo hết hạn, có thể rút ngắn mà không sửa file:
+
+```powershell
+.\gradlew.bat :booking-service:bootRun --args="--booking.payment.hold=PT1M --booking.expiry.interval=PT5S"
+```
 
 ## Chạy test
 
@@ -23,11 +37,12 @@ Tài khoản demo được thêm bằng `docker/seed/seed-app-users.example.sql`
 
 | Test | Kiểm tra | Cần Docker |
 | --- | --- | --- |
-| `BookingServiceTest` | Nghiệp vụ tạo và đọc booking, cách đổi lỗi database thành lỗi nghiệp vụ | Không |
-| `BookingApiTest` | Status và JSON của API, kiểm tra `checkIn`/`checkOut`, thứ tự lỗi, phân quyền, các loại JWT lỗi | Không |
-| `BookingFlowIntegrationTest` | Flyway, PostgreSQL thật, chống trùng giờ, FK ghép, cách ly tenant và owner, request đồng thời | Có |
+| `BookingServiceTest` | Thứ tự trừ tồn, tính tiền, ngày theo giờ Việt Nam, chuyển trạng thái, cách đổi lỗi database thành lỗi nghiệp vụ | Không |
+| `BookingExpiryJobTest` | Job xử lý mọi đơn quá hạn, đơn lỗi không chặn đơn khác | Không |
+| `BookingApiTest` | Status và JSON của API, validate ngày và `roomCount`, thứ tự lỗi, phân quyền, các loại JWT lỗi | Không |
+| `BookingFlowIntegrationTest` | Flyway, PostgreSQL thật, trừ và trả `room_inventory`, rollback, FK ghép, cách ly tenant và owner, hết hạn, request đồng thời. Sau mỗi test đều chạy truy vấn đối soát ERD §8 | Có |
 
-`BookingFlowIntegrationTest` bị bỏ qua nếu Docker không chạy, nên cần bật Docker khi lấy bằng chứng. Test này tạo bảng từ đúng migration của `iam-service` và `catalog-service`.
+`BookingFlowIntegrationTest` bị **bỏ qua mà build vẫn xanh** nếu Docker không chạy, nên phải bật Docker khi lấy bằng chứng và kiểm tra report không có test bị skip. Test này tạo bảng từ đúng migration của `iam-service` và `catalog-service`.
 
 ## Bàn giao cho Đạt (D)
 
@@ -38,39 +53,54 @@ Gọi qua Gateway tại `http://localhost:8080/api/bookings`. Không commit JWT 
 | `POST /api/bookings` | `USER` | `201` | `400`, `401`, `403`, `404`, `409` |
 | `GET /api/bookings` | `USER`, `ADMIN` | `200`, mảng theo `id` tăng dần | `401` |
 | `GET /api/bookings/{id}` | `USER`, `ADMIN` | `200` | `400`, `401`, `404` |
+| `POST /api/bookings/{id}/payment` | `USER` là chủ đơn | `200` | `400`, `401`, `403`, `404`, `409` |
+| `POST /api/bookings/{id}/cancel` | `USER` là chủ đơn | `200` | `400`, `401`, `403`, `404`, `409` |
 
-`USER` chỉ thấy booking của mình, `ADMIN` thấy mọi booking trong tenant của mình. Booking của tenant khác hoặc của người khác trả `404`.
+`USER` chỉ thấy booking của mình, `ADMIN` thấy mọi booking trong tenant của mình. Booking của tenant khác hoặc của người khác trả `404`. `payment` và `cancel` không có body.
 
-Body của `POST`. `checkIn` và `checkOut` là chuỗi ISO-8601 bắt buộc có múi giờ, `checkOut` phải sau `checkIn`:
+Body của `POST /api/bookings`. `checkIn` và `checkOut` là `YYYY-MM-DD`, không có giờ và múi giờ; `roomCount` từ 1 đến 10:
 
 ```json
-{ "roomId": 1, "checkIn": "2026-12-01T14:00:00+07:00", "checkOut": "2026-12-02T11:00:00+07:00" }
+{ "roomTypeId": 1, "checkIn": "2026-11-24", "checkOut": "2026-11-26", "roomCount": 1 }
 ```
 
-Response thành công. Thời gian luôn trả về theo UTC:
+Response thành công. `paymentExpiresAt` và `createdAt` theo UTC:
 
 ```json
 {
-  "id": 1,
+  "id": 5,
   "tenantId": 1,
-  "roomId": 1,
+  "roomTypeId": 1,
   "userEmail": "user-tenant1@example.com",
-  "checkIn": "2026-12-01T07:00:00Z",
-  "checkOut": "2026-12-02T04:00:00Z",
-  "status": "CONFIRMED",
+  "checkIn": "2026-11-24",
+  "checkOut": "2026-11-26",
+  "roomCount": 1,
+  "totalAmount": 1000000.00,
+  "status": "PENDING_PAYMENT",
+  "paymentExpiresAt": "2026-11-03T02:30:30Z",
   "createdAt": "2026-11-03T02:15:30Z"
 }
 ```
 
-Ý nghĩa của lỗi khi `POST`:
+Ý nghĩa của lỗi khi `POST /api/bookings`:
 
 | Status | Khi nào |
 | --- | --- |
-| `400` | Body sai, thời gian sai định dạng hoặc thiếu múi giờ, `checkOut` không sau `checkIn` |
+| `400` | Body sai, ngày sai định dạng hoặc có giờ, `checkOut` không sau `checkIn`, `checkIn` ở quá khứ, ở quá 30 đêm, `roomCount` ngoài 1–10 |
 | `401` | Thiếu hoặc sai JWT |
 | `403` | Không phải role `USER`, hoặc email trong JWT không có trong `app_user` của tenant đó |
-| `404` | Phòng không tồn tại hoặc thuộc tenant khác |
-| `409` | Phòng đã có booking đè lên khoảng thời gian này |
+| `404` | Loại phòng không tồn tại hoặc thuộc tenant khác |
+| `409` | Có đêm hết phòng hoặc chưa mở bán |
+
+Kết quả của `payment` và `cancel` theo trạng thái đơn:
+
+| Trạng thái đơn | `payment` | `cancel` |
+| --- | --- | --- |
+| `PENDING_PAYMENT`, còn hạn | `200 CONFIRMED`, giữ tồn | `200 CANCELLED`, trả tồn |
+| `PENDING_PAYMENT`, quá hạn, job chưa chạy | `409` | `200 CANCELLED`, trả tồn |
+| `CONFIRMED` | `409` | `409` |
+| `CANCELLED` | `409` | `200 CANCELLED`, không trả tồn lần nữa |
+| `EXPIRED` | `409` | `409` |
 
 Response lỗi là `application/problem+json`, riêng `401` và `403` về role có thể không có body. Chỉ dựa vào HTTP status, không dựa vào `detail`:
 
@@ -79,18 +109,20 @@ Response lỗi là `application/problem+json`, riêng `401` và `403` về role 
   "type": "about:blank",
   "title": "Conflict",
   "status": 409,
-  "detail": "Room is not available for the requested time",
+  "detail": "Not enough rooms for the requested stay",
   "instance": "/bookings"
 }
 ```
 
+Frontend phải khoá nút Đặt sau lần bấm đầu: không có idempotency key nên gửi lại sẽ tạo đơn thứ hai nếu còn phòng.
+
 ### Race test
 
-Chạy từ Git Bash với phòng 5 (`Race-Test Room 199`, tenant 1) và hai token của `user-tenant1` và `user2-tenant1`. Kết quả đúng là một dòng `201` và một dòng `409`. Thử trên DB vừa tạo, vì ID phòng chỉ đúng theo thứ tự seed trên DB sạch.
+Chạy từ Git Bash với loại phòng 5 (`Race Test`, tenant 1, chỉ có 1 phòng) và hai token của `user-tenant1` và `user2-tenant1`. Kết quả đúng là một dòng `201` và một dòng `409`. Thử trên DB vừa tạo, vì ID loại phòng chỉ đúng theo thứ tự seed trên DB sạch.
 
 ```bash
 URL=http://localhost:8080/api/bookings
-BODY='{"roomId":5,"checkIn":"2026-12-20T14:00:00+07:00","checkOut":"2026-12-21T11:00:00+07:00"}'
+BODY='{"roomTypeId":5,"checkIn":"2026-12-20","checkOut":"2026-12-21","roomCount":1}'
 for token in "$JWT_USER_1" "$JWT_USER_2"; do
   curl -s -o /dev/null -w '%{http_code}\n' -X POST "$URL" \
     -H "Authorization: Bearer $token" \
@@ -100,19 +132,41 @@ done
 wait
 ```
 
-### Xem và xóa dữ liệu booking
+### Xem, đối soát và reset dữ liệu
 
 ```bash
 docker exec hotelbooking-postgres psql -U hotelbooking -d hotelbooking -c "SELECT * FROM booking ORDER BY id;"
 docker exec hotelbooking-postgres psql -U hotelbooking -d hotelbooking -c "SELECT version, description, success FROM flyway_schema_history_booking;"
-docker exec hotelbooking-postgres psql -U hotelbooking -d hotelbooking -c "TRUNCATE booking RESTART IDENTITY;"
 ```
 
-Khi reset demo chỉ cần xóa booking, vì trạng thái còn trống của phòng được tính từ chính các booking.
+Truy vấn đối soát phải trả **0 dòng** sau mọi test và race test (T37):
+
+```sql
+SELECT i.tenant_id, i.room_type_id, i.stay_date, i.sold,
+       COALESCE(SUM(b.room_count), 0) AS expected_sold
+FROM room_inventory i
+LEFT JOIN booking b
+  ON b.tenant_id = i.tenant_id
+ AND b.room_type_id = i.room_type_id
+ AND b.status IN ('PENDING_PAYMENT', 'CONFIRMED')
+ AND i.stay_date >= b.check_in
+ AND i.stay_date <  b.check_out
+GROUP BY i.tenant_id, i.room_type_id, i.stay_date, i.sold
+HAVING i.sold <> COALESCE(SUM(b.room_count), 0);
+```
+
+Khi reset demo phải đưa `sold` về 0 cùng lúc với xoá booking, nếu không tồn sẽ lệch:
+
+```sql
+BEGIN;
+TRUNCATE booking RESTART IDENTITY;
+UPDATE room_inventory SET sold = 0;
+COMMIT;
+```
 
 ## Giả định đang chờ IAM
 
-Service đang yêu cầu claim `tenant_id` trong JWT là số nguyên JSON dương, ví dụ `"tenant_id": 1`, theo [api-contract.md §3.3](../docs/api-contract.md). A chưa ký xác nhận, nên `iam-service` cần phát đúng như vậy. Token có `tenant_id` dạng chuỗi sẽ bị trả `401`.
+Service đang yêu cầu claim `tenant_id` trong JWT là số nguyên JSON dương, ví dụ `"tenant_id": 1`, theo [api-contract.md §3.3](../docs/api-contract.md). `iam-service` cần phát đúng như vậy. Token có `tenant_id` dạng chuỗi sẽ bị trả `401`.
 
 ## Giới hạn hiện tại
 

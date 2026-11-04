@@ -39,7 +39,8 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(HttpMethod.POST, "/bookings").hasRole(StayHubJwtValidator.ROLE_USER)
+                        .requestMatchers(HttpMethod.POST, "/bookings", "/bookings/*/payment", "/bookings/*/cancel")
+                        .hasRole(StayHubJwtValidator.ROLE_USER)
                         .requestMatchers(HttpMethod.GET, "/bookings", "/bookings/*")
                         .hasAnyRole(StayHubJwtValidator.ROLE_USER, StayHubJwtValidator.ROLE_ADMIN)
                         .anyRequest().authenticated())
