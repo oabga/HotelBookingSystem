@@ -144,6 +144,7 @@ services:
         SERVICE: support-service
     environment:
       <<: *resource-server-env
+      BOOKING_BASE_URL: http://booking-service:8082
     ports:
       - "127.0.0.1:8085:8085"
     depends_on:
@@ -153,6 +154,28 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8085"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+
+  # Đọc notification_outbox do Support tạo nên phải chạy sau Support.
+  notification-service:
+    profiles: [dev-test]
+    build:
+      context: .
+      args:
+        SERVICE: notification-service
+    environment:
+      <<: *resource-server-env
+    ports:
+      - "127.0.0.1:8083:8083"
+    depends_on:
+      support-service:
+        condition: service_healthy
+      dev-token:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8083"]
       interval: 5s
       timeout: 3s
       retries: 40

@@ -40,13 +40,12 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(HttpMethod.POST, "/support/tickets")
+                        .requestMatchers(HttpMethod.POST, "/support/date-change-requests")
                         .hasRole(StayHubJwtValidator.ROLE_USER)
-                        .requestMatchers(HttpMethod.PATCH, "/support/tickets/*/status")
+                        .requestMatchers(HttpMethod.POST,
+                                "/support/date-change-requests/*/approve", "/support/date-change-requests/*/reject")
                         .hasRole(StayHubJwtValidator.ROLE_ADMIN)
-                        .requestMatchers(HttpMethod.GET, "/support/tickets", "/support/tickets/*")
-                        .hasAnyRole(StayHubJwtValidator.ROLE_USER, StayHubJwtValidator.ROLE_ADMIN)
-                        .requestMatchers(HttpMethod.POST, "/support/tickets/*/messages")
+                        .requestMatchers(HttpMethod.GET, "/support/date-change-requests", "/support/date-change-requests/*")
                         .hasAnyRole(StayHubJwtValidator.ROLE_USER, StayHubJwtValidator.ROLE_ADMIN)
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(server -> server

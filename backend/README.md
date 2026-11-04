@@ -23,12 +23,13 @@ Chỉ cần Docker có Compose v2, không cần cài JDK hay Node. Chạy từ t
 docker compose --profile dev-test up --build -d --wait
 ```
 
-Lần đầu phải tải image, Gradle và dependency nên có thể mất hơn 10 phút; các lần sau nhanh hơn nhiều nhờ cache. Lệnh kết thúc khi mọi service đã sẵn sàng. Migration chạy đúng thứ tự IAM → Catalog → Booking → Support và tài khoản test được tạo tự động.
+Lần đầu phải tải image, Gradle và dependency nên có thể mất hơn 10 phút; các lần sau nhanh hơn nhiều nhờ cache. Lệnh kết thúc khi mọi service đã sẵn sàng. Migration chạy đúng thứ tự IAM → Catalog → Booking → Support → Notification và tài khoản test được tạo tự động.
 
 | Service | Địa chỉ | Vai trò |
 | --- | --- | --- |
 | `booking-service` | `http://localhost:8082` | API đặt, thanh toán, huỷ booking |
-| `support-service` | `http://localhost:8085` | API ticket hỗ trợ, xem [support-service/README.md](support-service/README.md) |
+| `support-service` | `http://localhost:8085` | Phiếu xin đổi ngày, xem [support-service/README.md](support-service/README.md) |
+| `notification-service` | `http://localhost:8083` | Thông báo trong ứng dụng, xem [notification-service/README.md](notification-service/README.md) |
 | `catalog-service` | `http://localhost:8081` | API khách sạn, loại phòng, tồn kho |
 | `dev-token` | `http://127.0.0.1:8090` | Ký JWT tạm, phát JWKS, trang thử API Catalog |
 | `iam-service` | Không mở cổng | Chỉ để tạo bảng `tenant`, `app_user` |

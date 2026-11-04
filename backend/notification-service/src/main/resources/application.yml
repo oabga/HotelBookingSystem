@@ -5,7 +5,7 @@ spring:
   application:
     name: notification-service
   datasource:
-    url: jdbc:postgresql://localhost:5432/notification_db
+    url: jdbc:postgresql://localhost:5432/hotelbooking
     username: hotelbooking
     password: hotelbooking
   jpa:
@@ -14,10 +14,23 @@ spring:
     open-in-view: false
   flyway:
     locations: classpath:db/migration
+    table: flyway_schema_history_notification
+    # Dùng chung schema "public" với các service khác nên Flyway đòi baseline.
+    # baseline-version: 0 đảm bảo baseline nằm dưới V1 để V1 vẫn chạy.
+    baseline-on-migrate: true
+    baseline-version: 0
   security:
     oauth2:
       resourceserver:
         jwt:
-          # Ngoài scope docs/iam-google-sso-demo-plan-v2.md (đã bỏ notification-service) —
-          # chỉ sửa cho khỏi trỏ vào Keycloak đã xóa, module này hiện không được build/chạy trong demo.
+          # iam-service không có OIDC discovery nên dùng jwk-set-uri trực tiếp.
           jwk-set-uri: http://localhost:8084/.well-known/jwks.json
+
+security:
+  jwt:
+    issuer: http://localhost:8084
+
+notification:
+  delivery:
+    # Chu kỳ đọc notification_outbox; người dùng thấy thông báo chậm tối đa một chu kỳ.
+    interval: PT2S

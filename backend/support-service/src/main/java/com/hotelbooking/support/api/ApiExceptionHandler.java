@@ -1,8 +1,10 @@
 package com.hotelbooking.support.api;
 
 import com.hotelbooking.support.service.BookingNotFoundException;
-import com.hotelbooking.support.service.TicketNotFoundException;
-import com.hotelbooking.support.service.TicketStateConflictException;
+import com.hotelbooking.support.service.BookingServiceUnavailableException;
+import com.hotelbooking.support.service.InvalidDateChangeException;
+import com.hotelbooking.support.service.RequestConflictException;
+import com.hotelbooking.support.service.RequestNotFoundException;
 import com.hotelbooking.support.service.UserNotProvisionedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,14 +25,24 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
 
-    @ExceptionHandler({TicketNotFoundException.class, BookingNotFoundException.class})
+    @ExceptionHandler({RequestNotFoundException.class, BookingNotFoundException.class})
     ResponseEntity<Object> handleNotFound(RuntimeException ex) {
         return problem(HttpStatus.NOT_FOUND, ex.getMessage());
     }
 
-    @ExceptionHandler(TicketStateConflictException.class)
-    ResponseEntity<Object> handleConflict(TicketStateConflictException ex) {
+    @ExceptionHandler(RequestConflictException.class)
+    ResponseEntity<Object> handleConflict(RequestConflictException ex) {
         return problem(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    @ExceptionHandler(InvalidDateChangeException.class)
+    ResponseEntity<Object> handleInvalidDates(InvalidDateChangeException ex) {
+        return problem(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler(BookingServiceUnavailableException.class)
+    ResponseEntity<Object> handleBookingUnavailable(BookingServiceUnavailableException ex) {
+        return problem(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
     }
 
     @ExceptionHandler(UserNotProvisionedException.class)

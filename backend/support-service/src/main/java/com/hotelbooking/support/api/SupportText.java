@@ -8,16 +8,12 @@ import java.util.regex.Pattern;
  */
 final class SupportText {
 
-    static final int MAX_SUBJECT = 200;
     static final int MAX_BODY = 4000;
+    static final int MAX_NOTE = 1000;
 
     private static final Pattern HTML_TAG = Pattern.compile("<\\s*[a-zA-Z/!?]");
 
     private SupportText() {
-    }
-
-    static boolean isValidLine(String value, int maxLength) {
-        return isValid(value, maxLength) && value.strip().chars().noneMatch(c -> c == '\n' || c == '\r');
     }
 
     static boolean isValid(String value, int maxLength) {

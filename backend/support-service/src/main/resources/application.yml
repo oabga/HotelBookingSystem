@@ -29,3 +29,6 @@ spring:
 security:
   jwt:
     issuer: http://localhost:8084
+
+booking:
+  base-url: http://localhost:8082

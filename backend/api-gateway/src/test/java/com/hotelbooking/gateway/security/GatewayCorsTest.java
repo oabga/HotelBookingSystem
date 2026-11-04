@@ -48,10 +48,10 @@ class GatewayCorsTest {
     }
 
     @Test
-    void preflightAllowsPatchForSupportStatus() {
-        client.method(HttpMethod.OPTIONS).uri("/api/support/tickets/1/status")
+    void supportCenterPreflightIsAllowedForItsRoutes() {
+        client.method(HttpMethod.OPTIONS).uri("/api/support/date-change-requests/1/approve")
                 .header(HttpHeaders.ORIGIN, SUPPORT_CENTER)
-                .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "PATCH")
+                .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "POST")
                 .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "authorization,content-type")
                 .exchange()
                 .expectStatus().isOk()
