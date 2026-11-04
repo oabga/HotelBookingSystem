@@ -19,6 +19,18 @@ services:
       timeout: 5s
       retries: 10
 
+  adminer:
+    image: adminer:4
+    container_name: hotelbooking-adminer
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    ports:
+      - "127.0.0.1:8083:8080"
+
 # Không còn service Keycloak — plan v2 dùng Google làm Identity Provider,
 # iam-service (tự code) là OAuth2 Client + tự mint/verify JWT nội bộ.
 
