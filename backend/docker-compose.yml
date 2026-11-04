@@ -1,3 +1,17 @@
+# Mặc định chỉ có postgres:
+#   docker compose up -d postgres
+#
+# Profile dev-test dựng đủ IAM, Catalog, Booking và dev-token để test API mà không cần cài JDK:
+#   docker compose --profile dev-test up --build -d --wait
+# Hướng dẫn ở README.md. JWT của profile này do dev-token ký tạm, không phải IAM thật,
+# nên chỉ dùng trên máy local, không dùng để demo Google SSO.
+
+x-resource-server-env: &resource-server-env
+  SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/hotelbooking
+  # Giá trị claim "iss" của token, phải khớp với issuer trong test-api-catalog/server.mjs.
+  SECURITY_JWT_ISSUER: http://127.0.0.1:8090
+  SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://dev-token:8090/.well-known/jwks.json
+
 services:
   # 1 database "hotelbooking" chung cho iam-service, catalog-service, booking-service
   # (xem docs/iam-google-sso-demo-plan-v2.md §2) — POSTGRES_DB bên dưới tự tạo DB này,
@@ -18,6 +32,108 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # Ký JWT tạm và phát JWKS thay cho IAM trong lúc IAM chưa phát token.
+  dev-token:
+    profiles: [dev-test]
+    image: node:24-alpine
+    working_dir: /app
+    command: ["node", "server.mjs"]
+    environment:
+      # Phải nghe trên mọi interface để container khác và cổng publish truy cập được.
+      HOST: 0.0.0.0
+      CATALOG_HOST: catalog-service
+    volumes:
+      - ../test-api-catalog:/app:ro
+    ports:
+      - "127.0.0.1:8090:8090"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8090/.well-known/jwks.json"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # Service chỉ mở cổng sau khi Flyway chạy xong, nên cổng mở nghĩa là đã migrate xong.
+  # Thứ tự bắt buộc vì có FK thật: IAM -> Catalog -> Booking.
+  iam-service:
+    profiles: [dev-test]
+    build:
+      context: .
+      args:
+        SERVICE: iam-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/hotelbooking
+      # Bắt buộc phải có để IAM khởi động; profile này không đăng nhập Google nên giá trị giả là đủ.
+      GOOGLE_CLIENT_ID: dev-test-not-a-real-client
+      GOOGLE_CLIENT_SECRET: dev-test-not-a-real-secret
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8084"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+
+  # Tạo app_user khớp với token của dev-token, nếu không POST /bookings sẽ trả 403.
+  seed-app-users:
+    profiles: [dev-test]
+    image: postgres:16
+    environment:
+      PGPASSWORD: hotelbooking
+    command: ["psql", "-h", "postgres", "-U", "hotelbooking", "-d", "hotelbooking", "-v", "ON_ERROR_STOP=1", "-f", "/seed.sql"]
+    volumes:
+      - ./docker/seed/seed-app-users.dev-test.sql:/seed.sql:ro
+    depends_on:
+      iam-service:
+        condition: service_healthy
+
+  catalog-service:
+    profiles: [dev-test]
+    build:
+      context: .
+      args:
+        SERVICE: catalog-service
+    environment:
+      <<: *resource-server-env
+    ports:
+      - "127.0.0.1:8081:8081"
+    depends_on:
+      iam-service:
+        condition: service_healthy
+      dev-token:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8081"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+
+  booking-service:
+    profiles: [dev-test]
+    build:
+      context: .
+      args:
+        SERVICE: booking-service
+    environment:
+      <<: *resource-server-env
+      # Rút ngắn khi test hết hạn, ví dụ: BOOKING_PAYMENT_HOLD=PT1M BOOKING_EXPIRY_INTERVAL=PT5S
+      BOOKING_PAYMENT_HOLD: ${BOOKING_PAYMENT_HOLD:-PT15M}
+      BOOKING_EXPIRY_INTERVAL: ${BOOKING_EXPIRY_INTERVAL:-PT60S}
+    ports:
+      - "127.0.0.1:8082:8082"
+    depends_on:
+      catalog-service:
+        condition: service_healthy
+      seed-app-users:
+        condition: service_completed_successfully
+      dev-token:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8082"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
 
 # Không còn service Keycloak — plan v2 dùng Google làm Identity Provider,
 # iam-service (tự code) là OAuth2 Client + tự mint/verify JWT nội bộ.

@@ -4,19 +4,36 @@ Service đặt, xem, thanh toán mô phỏng và huỷ booking, cổng `8082`, o
 
 ## Chạy local
 
-Cần JDK 21 và PostgreSQL với database chung `hotelbooking`. Phải chạy migration theo thứ tự IAM → Catalog → Booking, vì bảng `booking` có FK sang `tenant`, `app_user` và `room_type`. Nếu chạy Booking trước trên DB trống, migration sẽ báo lỗi thiếu bảng.
+**Cách nhanh nhất là dùng Docker:** một lệnh dựng đủ service, không cần JDK. Xem [backend/README.md](../README.md#chạy-thử-bằng-docker).
 
-Các lệnh chạy từ thư mục `backend/`. DB tạo trước khi chuyển sang schema `room_inventory` phải dựng lại (ERD §11). `docker compose down -v` xoá toàn bộ dữ liệu local:
+Cách dưới đây chạy trực tiếp bằng Gradle, dùng khi cần debug. Cần JDK 21 và PostgreSQL với database chung `hotelbooking`. Phải chạy migration theo thứ tự IAM → Catalog → Booking, vì bảng `booking` có FK sang `tenant`, `app_user` và `room_type`. Nếu chạy Booking trước trên DB trống, migration sẽ báo lỗi thiếu bảng.
 
-```powershell
-docker compose down -v
-docker compose up -d postgres
-.\gradlew.bat :iam-service:bootRun
-.\gradlew.bat :catalog-service:bootRun
-.\gradlew.bat :booking-service:bootRun
+Chạy từ thư mục `backend/` bằng Git Bash, mỗi service một terminal. IAM chưa phát JWT nên token lấy từ `test-api-catalog`, chạy riêng bằng `node server.mjs` trong thư mục đó. Dán khối biến môi trường vào mọi terminal chạy service:
+
+```bash
+export JAVA_HOME=<đường dẫn JDK 21>
+# Trên Windows ở Việt Nam, JVM báo múi giờ Asia/Saigon và postgres:16 từ chối khi kết nối.
+export JAVA_TOOL_OPTIONS=-Duser.timezone=UTC
+# Bắt buộc để IAM khởi động; giá trị giả là đủ nếu không đăng nhập Google.
+export GOOGLE_CLIENT_ID=dummy GOOGLE_CLIENT_SECRET=dummy
+export SECURITY_JWT_ISSUER=http://127.0.0.1:8090
+export SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI=http://127.0.0.1:8090/.well-known/jwks.json
 ```
 
-Tài khoản demo được thêm bằng `docker/seed/seed-app-users.example.sql`. Xem hướng dẫn ở đầu file đó. Để gọi được API, IAM phải đang chạy ở `:8084` để phát JWKS.
+```bash
+docker compose up -d postgres
+./gradlew :iam-service:bootRun       # thấy log Started thì mới chạy service tiếp theo
+./gradlew :catalog-service:bootRun
+./gradlew :booking-service:bootRun
+```
+
+Token của `test-api-catalog` dùng email `<role viết thường>-tenant<id>@catalog.local.test`, nên phải có `app_user` tương ứng, nếu không `POST /bookings` trả `403`. Thêm bằng `docker/seed/seed-app-users.dev-test.sql`:
+
+```bash
+docker exec -i hotelbooking-postgres psql -U hotelbooking -d hotelbooking < docker/seed/seed-app-users.dev-test.sql
+```
+
+Khi test đăng nhập Google thật thì dùng `docker/seed/seed-app-users.example.sql` theo hướng dẫn ở đầu file đó. DB tạo trước khi chuyển sang schema `room_inventory` phải dựng lại (ERD §11) bằng `docker compose down -v`, lệnh này xoá toàn bộ dữ liệu local.
 
 | Cấu hình trong `application.yml` | Mặc định | Ý nghĩa |
 | --- | --- | --- |
