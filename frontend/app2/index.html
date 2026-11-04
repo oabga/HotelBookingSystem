@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="stayhub-api-base" content="http://localhost:8080/api">
   <title>StayHub — App 2</title>
   <link rel="stylesheet" href="/styles.css">
   <script src="/auth.js" defer></script>
@@ -23,8 +24,8 @@
       <section class="hero" aria-labelledby="page-title">
         <div>
           <span class="eyebrow">Frontend demo · App 2</span>
-          <h1 id="page-title">Cùng tài khoản trên origin thứ hai.</h1>
-          <p>Dùng cùng luồng Google SSO. Quyền luôn theo role trong JWT, không theo số ứng dụng.</p>
+          <h1 id="page-title">Bảng điều khiển quản trị khách sạn.</h1>
+          <p>Dùng Google SSO để xem booking trong tenant, quản lý tồn kho theo đêm, thêm loại phòng và cập nhật giá.</p>
         </div>
         <div class="login-card">
           <h2>Phiên đăng nhập</h2>
@@ -39,12 +40,12 @@
         <div class="account-item"><span>Role từ JWT</span><strong id="user-role">Chưa xác định</strong></div>
         <div class="account-item"><span>Tenant từ JWT</span><strong id="user-tenant">Chưa xác định</strong></div>
       </div>
-      <p class="status" id="integration-status">Khách sạn, Booking và ADMIN cần JWT.</p>
+      <p class="status" id="integration-status">Đăng nhập bằng tài khoản ADMIN để tải dữ liệu tenant qua API Gateway.</p>
 
-      <section class="section" aria-labelledby="search-title">
+      <section id="catalog-section" class="section" aria-labelledby="search-title">
         <div class="section-heading">
-          <div><span class="eyebrow">01 · Tìm phòng</span><h2 id="search-title">Phòng còn trống</h2></div>
-          <p>Chỉ hiện loại phòng còn trống ở mọi đêm trong kỳ ở. Kết quả có thể cũ ngay sau khi trả về; Booking API quyết định cuối cùng.</p>
+          <div><span class="eyebrow">01 · Catalog</span><h2 id="search-title">Khách sạn và phòng còn trống</h2></div>
+          <p>Chọn khách sạn thuộc tenant để xem loại phòng còn trống trong kỳ lưu trú.</p>
         </div>
         <div class="panel">
           <p id="hotels-status" class="status" role="status">Đăng nhập để xem khách sạn.</p>
@@ -64,24 +65,23 @@
         <p id="booking-status" class="feedback" role="status"></p>
       </section>
 
-      <section class="section" aria-labelledby="bookings-title">
+      <section id="bookings-section" class="section" aria-labelledby="bookings-title">
         <div class="section-heading">
-          <div><span class="eyebrow">02 · Booking</span><h2 id="bookings-title">Booking của tôi</h2></div>
-          <p id="actions-note">Đăng nhập để xem booking.</p>
+          <div><span class="eyebrow">02 · Booking API</span><h2 id="bookings-title">Booking trong tenant</h2></div>
+          <p id="actions-note">Booking trong tenant chỉ để xem; quản lý trạng thái nằm trong luồng booking.</p>
         </div>
         <div class="list-toolbar">
           <p id="bookings-status" class="status" role="status">Đăng nhập để xem booking.</p>
           <button id="bookings-reload" class="action-button small-button ghost-button" type="button" disabled>Tải lại</button>
         </div>
         <p id="booking-action-status" class="feedback" role="status"></p>
-        <p class="note"><a href="http://localhost:3002/">Muốn đổi ngày thuê phòng? Mở Support Center</a></p>
         <ul id="booking-list" class="room-list" aria-label="Danh sách booking"></ul>
       </section>
 
       <section id="admin-section" class="section" aria-labelledby="admin-title" hidden>
         <div class="section-heading">
-          <div><span class="eyebrow">03 · ADMIN</span><h2 id="admin-title">Quản lý khách sạn đã chọn</h2></div>
-          <p>Áp dụng cho khách sạn đang chọn ở phần Tìm phòng. Role chỉ điều khiển giao diện; backend xác minh JWT và quyền ADMIN.</p>
+          <div><span class="eyebrow">03 · ADMIN API</span><h2 id="admin-title">Quản lý khách sạn đã chọn</h2></div>
+          <p>Chọn khách sạn ở trên. Backend xác minh JWT, quyền ADMIN và tenant cho mỗi yêu cầu.</p>
         </div>
         <div class="action-grid">
           <section class="panel wide-panel" aria-labelledby="inventory-title">

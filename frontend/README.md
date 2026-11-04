@@ -19,9 +19,10 @@ Mở `http://localhost:3000/` (App 1), `http://localhost:3001/` (App 2) và `htt
 - **Đặt phòng (USER):** gửi `POST /api/bookings` với `roomTypeId`, `checkIn`, `checkOut`, `roomCount`. Mọi nút Đặt bị khoá tới khi có response và không tự gửi lại, vì gửi lại sẽ tạo đơn thứ hai.
 - **Booking:** USER xem đơn của mình, thanh toán mô phỏng và huỷ đơn `PENDING_PAYMENT`. ADMIN xem mọi đơn trong tenant nhưng không có nút thao tác.
 - **ADMIN:** xem tồn kho theo đêm, thêm loại phòng và sửa giá cho khách sạn đang chọn. Danh sách loại phòng để sửa giá lấy từ tồn kho đã tải, vì contract không có API liệt kê loại phòng.
+- **App 2 (`:3001`):** màn hình quản trị riêng, chỉ tải API khi JWT có role `ADMIN`. Gọi `GET /api/hotels`, `GET /api/hotels/{id}/availability`, `GET /api/admin/hotels/{id}/inventory`, `POST /api/hotels/{id}/room-types`, `PUT /api/room-types/{id}/price` và `GET /api/bookings`. ADMIN xem bookings trong tenant; thao tác sửa vẫn được backend xác thực role/tenant.
 - **Lỗi:** giao diện chỉ dựa vào HTTP status, không đọc `detail`. 401 ở bất kỳ API nào sẽ báo đăng nhập lại. Khi mất kết nối lúc ghi, giao diện báo chưa rõ kết quả thay vì coi là thất bại.
 
-- **Support Center (`:3002`):** ứng dụng riêng, đăng nhập qua cùng IAM nên có phiên rồi thì không phải nhập lại mật khẩu. USER chọn đơn đã thanh toán, chọn ngày mới, kiểm tra còn phòng, nhập mô tả rồi gửi phiếu; kết quả được báo qua thông báo trong trang, tự cập nhật sau mỗi 15 giây. ADMIN xem phiếu trong tenant và duyệt hoặc từ chối. Xem `backend/support-service/README.md` và `backend/notification-service/README.md`.
+- **Support Center (`:3002`):** ứng dụng riêng, đăng nhập qua cùng IAM nên có phiên rồi thì không phải nhập lại mật khẩu. USER gọi `GET /api/bookings/reschedulable`, `GET /api/bookings/{id}/reschedule-quote`, `POST /api/support/date-change-requests`, xem phiếu của mình và `GET /api/notifications`; có thể đánh dấu thông báo đã đọc qua `POST /api/notifications/{id}/read`. ADMIN xem hàng chờ trong tenant qua `GET /api/support/date-change-requests`, rồi xử lý bằng `POST .../{id}/approve` hoặc `POST .../{id}/reject`. Notification được cập nhật tự động mỗi 15 giây. Xem `backend/support-service/README.md` và `backend/notification-service/README.md`.
 
 ## Kiểm tra local
 

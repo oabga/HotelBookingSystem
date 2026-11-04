@@ -17,13 +17,13 @@
 
 ## Chạy thử bằng Docker
 
-Chỉ cần Docker có Compose v2, không cần cài JDK hay Node. Chạy từ thư mục `backend/`:
+Chỉ cần Docker có Compose v2, không cần cài JDK hay Node. Từ mọi thư mục, chạy:
 
 ```bash
-docker compose --profile dev-test up --build -d --wait
+bash /Volumes/DATA/JIKAY/src/project-demo/HotelBookingSystem/backend/test/run-all.sh
 ```
 
-Lần đầu phải tải image, Gradle và dependency nên có thể mất hơn 10 phút; các lần sau nhanh hơn nhiều nhờ cache. Lệnh kết thúc khi mọi service đã sẵn sàng. Migration chạy đúng thứ tự IAM → Catalog → Booking → Support → Notification và tài khoản test được tạo tự động.
+Lần đầu phải tải image, Gradle và dependency nên có thể mất hơn 10 phút; các lần sau nhanh hơn nhờ cache. Script build và đợi các service khỏe, tạo tài khoản test, sinh mock fixtures, kiểm tra Flyway và tính nhất quán DB, rồi gọi workflow API qua Gateway. Nó không xóa Docker volume hiện tại.
 
 | Service | Địa chỉ | Vai trò |
 | --- | --- | --- |
@@ -31,11 +31,12 @@ Lần đầu phải tải image, Gradle và dependency nên có thể mất hơn
 | `support-service` | `http://localhost:8085` | Phiếu xin đổi ngày, xem [support-service/README.md](support-service/README.md) |
 | `notification-service` | `http://localhost:8083` | Thông báo trong ứng dụng, xem [notification-service/README.md](notification-service/README.md) |
 | `catalog-service` | `http://localhost:8081` | API khách sạn, loại phòng, tồn kho |
-| `dev-token` | `http://127.0.0.1:8090` | Ký JWT tạm, phát JWKS, trang thử API Catalog |
-| `iam-service` | Không mở cổng | Chỉ để tạo bảng `tenant`, `app_user` |
+| `dev-token` | `http://127.0.0.1:8090` | Ký JWT tạm cho local API tests; không phải Google SSO |
+| `iam-service` | `http://127.0.0.1:8084` | IAM, JWKS và migration; Google login cần OAuth credentials thật |
 | `postgres` | `localhost:5432` | Database chung `hotelbooking` |
+| `adminer` | `http://127.0.0.1:8083` | Xem database qua trình duyệt |
 
-**Giới hạn:** profile này gọi thẳng service bằng JWT tạm, nên không kiểm tra Gateway, Google login và IAM thật. Chỉ dùng trên máy local, không dùng để demo Google SSO. Mỗi tenant chỉ có một tài khoản `USER`, nên race test là nhiều request từ cùng một người.
+**Giới hạn:** JWT tạm kiểm tra API Gateway và backend authorization nhưng không kiểm tra Google login thật. Chỉ dùng trên máy local, không public port của token harness. Chi tiết ở [test/README.md](test/README.md).
 
 ### Test API bằng curl
 
@@ -126,19 +127,19 @@ API Catalog thử được trên giao diện tại <http://127.0.0.1:8090>. Tran
 sql "TRUNCATE booking RESTART IDENTITY CASCADE; UPDATE room_inventory SET sold = 0;"
 
 # Rút ngắn thời gian giữ phòng khi test hết hạn
-BOOKING_PAYMENT_HOLD=PT1M BOOKING_EXPIRY_INTERVAL=PT5S docker compose --profile dev-test up -d --wait booking-service
+BOOKING_PAYMENT_HOLD=PT1M BOOKING_EXPIRY_INTERVAL=PT5S docker compose --profile workflow up -d --wait booking-service
 
 # Xem log
-docker compose --profile dev-test logs -f booking-service
+docker compose --profile workflow logs -f booking-service
 
 # Dựng lại sau khi pull hoặc sửa code
-docker compose --profile dev-test up --build -d --wait
+docker compose --profile workflow up --build -d --wait
 
 # Dừng, giữ dữ liệu
-docker compose --profile dev-test down
+docker compose --profile workflow down
 
 # Dừng và XOÁ toàn bộ dữ liệu local, cần khi migration đã merge bị đổi
-docker compose --profile dev-test down -v
+docker compose --profile workflow down -v
 ```
 
 ## Test tự động

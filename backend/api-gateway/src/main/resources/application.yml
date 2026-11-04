@@ -22,37 +22,37 @@ spring:
       # /auth/**; IAM được gọi trực tiếp :8084, không qua Gateway.
       routes:
         - id: hotels
-          uri: http://localhost:8081
+          uri: ${CATALOG_SERVICE_URL:http://localhost:8081}
           predicates:
             - Path=/api/hotels/**
           filters:
             - StripPrefix=1
         - id: room-types
-          uri: http://localhost:8081
+          uri: ${CATALOG_SERVICE_URL:http://localhost:8081}
           predicates:
             - Path=/api/room-types/**
           filters:
             - StripPrefix=1
         - id: admin
-          uri: http://localhost:8081
+          uri: ${CATALOG_SERVICE_URL:http://localhost:8081}
           predicates:
             - Path=/api/admin/**
           filters:
             - StripPrefix=1
         - id: bookings
-          uri: http://localhost:8082
+          uri: ${BOOKING_SERVICE_URL:http://localhost:8082}
           predicates:
             - Path=/api/bookings/**
           filters:
             - StripPrefix=1
         - id: support
-          uri: http://localhost:8085
+          uri: ${SUPPORT_SERVICE_URL:http://localhost:8085}
           predicates:
             - Path=/api/support/**
           filters:
             - StripPrefix=1
         - id: notifications
-          uri: http://localhost:8083
+          uri: ${NOTIFICATION_SERVICE_URL:http://localhost:8083}
           predicates:
             - Path=/api/notifications/**
           filters:
