@@ -17,5 +17,6 @@ include(
     'iam-service',
     'catalog-service',
     'booking-service',
+    'support-service',
     'notification-service'
 )

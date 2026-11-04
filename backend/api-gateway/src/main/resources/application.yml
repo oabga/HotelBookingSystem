@@ -18,7 +18,7 @@ spring:
           jwk-set-uri: http://localhost:8084/.well-known/jwks.json
   cloud:
     gateway:
-      # Theo docs/api-contract.md §6 (bản 3.0): 4 route cố định. Không có route /dev/** hay
+      # 4 route theo contract bản 3.0, thêm route support và notifications. Không có route /dev/** hay
       # /auth/**; IAM được gọi trực tiếp :8084, không qua Gateway.
       routes:
         - id: hotels
@@ -45,12 +45,25 @@ spring:
             - Path=/api/bookings/**
           filters:
             - StripPrefix=1
+        - id: support
+          uri: http://localhost:8085
+          predicates:
+            - Path=/api/support/**
+          filters:
+            - StripPrefix=1
+        - id: notifications
+          uri: http://localhost:8083
+          predicates:
+            - Path=/api/notifications/**
+          filters:
+            - StripPrefix=1
       globalcors:
         cors-configurations:
           '[/**]':
             allowedOrigins:
               - http://localhost:3000
               - http://localhost:3001
+              - http://localhost:3002
             allowedMethods:
               - GET
               - POST

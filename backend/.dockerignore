@@ -1,0 +1,15 @@
+**/build
+**/.gradle
+**/bin
+**/out
+.git
+.idea
+.vscode
+.kotlin
+*.iml
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker
+docs
+**/*.md

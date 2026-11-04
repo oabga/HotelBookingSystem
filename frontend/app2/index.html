@@ -6,8 +6,11 @@
   <title>StayHub — App 2</title>
   <link rel="stylesheet" href="/styles.css">
   <script src="/auth.js" defer></script>
-  <script src="/rooms.js" defer></script>
-  <script src="/demo-ui.js" defer></script>
+  <script src="/api.js" defer></script>
+  <script src="/bookings.js" defer></script>
+  <script src="/catalog.js" defer></script>
+  <script src="/admin.js" defer></script>
+  <script src="/app.js" defer></script>
 </head>
 <body data-app-id="app2">
   <div class="page-shell">
@@ -20,8 +23,8 @@
       <section class="hero" aria-labelledby="page-title">
         <div>
           <span class="eyebrow">Frontend demo · App 2</span>
-          <h1 id="page-title">Quản lý phòng trên origin thứ hai.</h1>
-          <p>Dùng cùng luồng Google SSO, xem phòng theo tenant và chuẩn bị thao tác ADMIN. Quyền luôn theo role trong JWT, không theo số ứng dụng.</p>
+          <h1 id="page-title">Cùng tài khoản trên origin thứ hai.</h1>
+          <p>Dùng cùng luồng Google SSO. Quyền luôn theo role trong JWT, không theo số ứng dụng.</p>
         </div>
         <div class="login-card">
           <h2>Phiên đăng nhập</h2>
@@ -36,78 +39,99 @@
         <div class="account-item"><span>Role từ JWT</span><strong id="user-role">Chưa xác định</strong></div>
         <div class="account-item"><span>Tenant từ JWT</span><strong id="user-tenant">Chưa xác định</strong></div>
       </div>
-      <p class="status" id="integration-status">Danh sách phòng, Booking và ADMIN cần JWT.</p>
+      <p class="status" id="integration-status">Khách sạn, Booking và ADMIN cần JWT.</p>
 
-      <section class="section" aria-labelledby="rooms-title">
+      <section class="section" aria-labelledby="search-title">
         <div class="section-heading">
-          <div><span class="eyebrow">01 · Phòng</span><h2 id="rooms-title">Danh sách phòng</h2></div>
-          <p>Hiển thị ID, tên và giá. Chọn phòng rồi gửi khoảng thời gian; Booking API quyết định có đặt được hay không.</p>
+          <div><span class="eyebrow">01 · Tìm phòng</span><h2 id="search-title">Phòng còn trống</h2></div>
+          <p>Chỉ hiện loại phòng còn trống ở mọi đêm trong kỳ ở. Kết quả có thể cũ ngay sau khi trả về; Booking API quyết định cuối cùng.</p>
         </div>
-        <p id="rooms-status" class="status" role="status">Đăng nhập để xem phòng.</p>
-        <ul id="room-list" class="room-list" aria-label="Danh sách phòng"></ul>
+        <div class="panel">
+          <p id="hotels-status" class="status" role="status">Đăng nhập để xem khách sạn.</p>
+          <form id="search-form" novalidate>
+            <fieldset id="search-fields" disabled>
+              <div class="form-grid search-grid">
+                <label class="field" for="hotel-select">Khách sạn<select id="hotel-select"><option value="">Chọn khách sạn</option></select></label>
+                <label class="field" for="search-check-in">Ngày nhận phòng<input id="search-check-in" type="date"></label>
+                <label class="field" for="search-check-out">Ngày trả phòng<input id="search-check-out" type="date"></label>
+              </div>
+              <button id="search-submit" class="action-button" type="submit">Tìm kiếm</button>
+            </fieldset>
+          </form>
+          <p id="search-status" class="feedback" role="status"></p>
+        </div>
+        <ul id="result-list" class="room-list" aria-label="Loại phòng còn trống"></ul>
+        <p id="booking-status" class="feedback" role="status"></p>
       </section>
 
-      <section class="section" aria-labelledby="actions-title">
+      <section class="section" aria-labelledby="bookings-title">
         <div class="section-heading">
-          <div><span class="eyebrow">02 · Thao tác</span><h2 id="actions-title">Thao tác theo role</h2></div>
-          <p>Booking dành cho USER; quản lý phòng dành cho ADMIN.</p>
+          <div><span class="eyebrow">02 · Booking</span><h2 id="bookings-title">Booking của tôi</h2></div>
+          <p id="actions-note">Đăng nhập để xem booking.</p>
         </div>
-        <p id="actions-status" class="status" role="status">Đăng nhập để mở thao tác theo role.</p>
+        <div class="list-toolbar">
+          <p id="bookings-status" class="status" role="status">Đăng nhập để xem booking.</p>
+          <button id="bookings-reload" class="action-button small-button ghost-button" type="button" disabled>Tải lại</button>
+        </div>
+        <p id="booking-action-status" class="feedback" role="status"></p>
+        <p class="note"><a href="http://localhost:3002/">Muốn đổi ngày thuê phòng? Mở Support Center</a></p>
+        <ul id="booking-list" class="room-list" aria-label="Danh sách booking"></ul>
+      </section>
+
+      <section id="admin-section" class="section" aria-labelledby="admin-title" hidden>
+        <div class="section-heading">
+          <div><span class="eyebrow">03 · ADMIN</span><h2 id="admin-title">Quản lý khách sạn đã chọn</h2></div>
+          <p>Áp dụng cho khách sạn đang chọn ở phần Tìm phòng. Role chỉ điều khiển giao diện; backend xác minh JWT và quyền ADMIN.</p>
+        </div>
         <div class="action-grid">
-          <section class="panel" aria-labelledby="booking-title">
-            <span class="eyebrow">USER · Booking API</span>
-            <h3 id="booking-title">Đặt phòng</h3>
-            <p class="note">Chọn phòng từ danh sách phía trên và khoảng check-in/check-out. Booking API xác nhận hoặc trả lỗi trùng giờ.</p>
-            <form id="booking-form" novalidate>
-              <fieldset id="booking-fields" disabled>
-                <div class="form-grid">
-                  <label class="field full" for="book-room-id">Room ID<input id="book-room-id" type="number" min="1" step="1" placeholder="Chọn phòng từ danh sách" readonly></label>
-                  <label class="field" for="check-in">Check-in<input id="check-in" type="datetime-local"></label>
-                  <label class="field" for="check-out">Check-out<input id="check-out" type="datetime-local"></label>
-                </div>
-                <button id="booking-submit" class="action-button" type="submit">Đặt phòng</button>
-              </fieldset>
+          <section class="panel wide-panel" aria-labelledby="inventory-title">
+            <h3 id="inventory-title">Tồn kho theo đêm</h3>
+            <form id="inventory-form" novalidate>
+              <div class="form-grid">
+                <label class="field" for="inventory-check-in">Từ ngày<input id="inventory-check-in" type="date"></label>
+                <label class="field" for="inventory-check-out">Đến trước ngày<input id="inventory-check-out" type="date"></label>
+              </div>
+              <button id="inventory-submit" class="action-button secondary-button" type="submit">Xem tồn kho</button>
             </form>
-            <p id="booking-action-status" class="feedback" role="status">Chưa có yêu cầu đặt phòng.</p>
-            <div class="subsection">
-              <h4>Booking của tôi</h4>
-              <p id="bookings-status" class="placeholder">Chưa kết nối Booking API. Chưa có dữ liệu để hiển thị.</p>
+            <p id="inventory-status" class="feedback" role="status">Chọn khách sạn và khoảng ngày.</p>
+            <div class="table-scroll">
+              <table>
+                <thead><tr><th scope="col">ID</th><th scope="col">Loại phòng</th><th scope="col">Đêm</th><th scope="col">Tổng</th><th scope="col">Đã bán</th><th scope="col">Còn</th></tr></thead>
+                <tbody id="inventory-rows"></tbody>
+              </table>
             </div>
           </section>
 
-          <section id="admin-panel" class="panel" aria-labelledby="admin-title" hidden>
-            <span class="eyebrow">ADMIN · Rooms API</span>
-            <h3 id="admin-title">Quản lý phòng</h3>
-            <p class="note">Role chỉ điều khiển giao diện; backend xác minh JWT và quyền ADMIN.</p>
-            <form id="create-room-form" novalidate>
-              <fieldset id="create-room-fields" disabled>
-                <div class="form-grid">
-                  <label class="field full" for="new-room-name">Tên phòng<input id="new-room-name" type="text" autocomplete="off" placeholder="Tên phòng mới"></label>
-                  <label class="field full" for="new-room-price">Giá phòng<input id="new-room-price" type="number" min="0.01" max="99999999.99" step="0.01" placeholder="Giá VND"></label>
-                </div>
-                <button id="create-room-submit" class="action-button secondary-button" type="submit">Thêm phòng</button>
-              </fieldset>
+          <section class="panel" aria-labelledby="create-title">
+            <h3 id="create-title">Thêm loại phòng</h3>
+            <form id="create-room-type-form" novalidate>
+              <div class="form-grid">
+                <label class="field full" for="new-room-type-name">Tên loại phòng<input id="new-room-type-name" type="text" maxlength="100" autocomplete="off"></label>
+                <label class="field" for="new-room-type-capacity">Số khách mỗi phòng<input id="new-room-type-capacity" type="number" min="1" max="20" step="1"></label>
+                <label class="field" for="new-room-type-total">Số phòng<input id="new-room-type-total" type="number" min="1" max="1000" step="1"></label>
+                <label class="field full" for="new-room-type-price">Giá mỗi đêm (VND)<input id="new-room-type-price" type="number" min="0.01" max="99999999.99" step="0.01"></label>
+              </div>
+              <button id="create-room-type-submit" class="action-button secondary-button" type="submit">Thêm loại phòng</button>
             </form>
-            <p id="admin-create-status" class="feedback" role="status">Chưa có yêu cầu thêm phòng.</p>
-            <div class="subsection">
-              <h4>Sửa giá</h4>
-              <form id="price-form" novalidate>
-                <fieldset id="price-fields" disabled>
-                  <div class="form-grid">
-                    <label class="field" for="price-room-id">Room ID<input id="price-room-id" type="number" min="1" step="1" placeholder="Chọn từ danh sách" readonly></label>
-                    <label class="field" for="room-price">Giá mới<input id="room-price" type="number" min="0.01" max="99999999.99" step="0.01"></label>
-                  </div>
-                  <button id="price-submit" class="action-button secondary-button" type="submit">Sửa giá</button>
-                </fieldset>
-              </form>
-              <p id="admin-price-status" class="feedback" role="status">Chưa có yêu cầu sửa giá.</p>
-            </div>
+            <p id="admin-create-status" class="feedback" role="status"></p>
+          </section>
+
+          <section class="panel" aria-labelledby="price-title">
+            <h3 id="price-title">Sửa giá</h3>
+            <form id="price-form" novalidate>
+              <div class="form-grid">
+                <label class="field full" for="price-room-type">Loại phòng<select id="price-room-type"></select></label>
+                <label class="field full" for="new-price">Giá mới mỗi đêm (VND)<input id="new-price" type="number" min="0.01" max="99999999.99" step="0.01"></label>
+              </div>
+              <button id="price-submit" class="action-button secondary-button" type="submit">Sửa giá</button>
+            </form>
+            <p id="admin-price-status" class="feedback" role="status"></p>
           </section>
         </div>
       </section>
     </main>
 
-    <footer class="footer-note">StayHub demo · Claims ở frontend chỉ phục vụ hiển thị. Backend xác minh quyền và quyết định kết quả Booking.</footer>
+    <footer class="footer-note">StayHub demo · Thanh toán chỉ là mô phỏng. Claims ở frontend chỉ phục vụ hiển thị; backend xác minh quyền và quyết định kết quả.</footer>
   </div>
 </body>
 </html>
