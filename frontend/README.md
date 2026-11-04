@@ -6,8 +6,8 @@ App 1 và App 2 là hai trang HTML/JavaScript thuần ở hai origin. Nút **Log
 
 Cần Node.js. Từ thư mục gốc repository, chạy:
 
-```powershell
-node frontend-demo/server.js
+```bash
+node server.js
 ```
 
 Mở `http://localhost:3000/` (App 1) và `http://localhost:3001/` (App 2). Server cũng phục vụ cùng giao diện tại `http://localhost:3000/callback/` và `http://localhost:3001/callback/`, cùng các file JS/CSS trên mỗi origin. Dừng bằng `Ctrl+C`.
@@ -24,8 +24,8 @@ Mở `http://localhost:3000/` (App 1) và `http://localhost:3001/` (App 2). Serv
 
 ## Kiểm tra local
 
-```powershell
-node --test frontend-demo/*.test.js
+```bash
+node --test *.test.js
 ```
 
 Test dùng JWT **tổng hợp, không ký** và `fetch` giả lập để kiểm tra giao diện: **MOCK ONLY**. Chưa có bằng chứng E2E với backend thật; đăng nhập và các thao tác API cần JWT, IAM, Gateway và service của A/B/C. Khi server chạy, bốn URL `/` và `/callback/` nêu trên phải trả HTTP 200.
