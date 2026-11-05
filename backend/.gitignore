@@ -11,7 +11,16 @@ build
 docker/seed/*.local.sql
 
 # Local Google OAuth credentials — never commit
+.env
+.env.*
+!.env.example
+!.env.*.example
 .env.local
+env.local
+
+# Keep the build guide even though generated build directories are ignored.
+!/docs/build/
+!/docs/build/**
 
 
 # Thư mục build và biên dịch của Java

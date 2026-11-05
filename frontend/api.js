@@ -10,7 +10,7 @@
   const maxNights = 30;
   const maxPrice = 99999999.99;
   const bookingStatuses = ["PENDING_PAYMENT", "CONFIRMED", "CANCELLED", "EXPIRED"];
-  const sessionExpired = "Phiên đăng nhập không hợp lệ hoặc đã hết hạn. Hãy đăng nhập lại.";
+  const sessionExpired = "Phiên đã hết hạn hoặc API từ chối xác thực (401). Hãy đăng nhập lại; nếu lỗi còn tiếp diễn, kiểm tra cấu hình IAM/JWKS.";
   const moneyFormatter = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 2 });
 
   const isPositiveId = value => Number.isSafeInteger(value) && value > 0;

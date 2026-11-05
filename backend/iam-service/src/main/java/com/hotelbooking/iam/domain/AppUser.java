@@ -7,7 +7,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
-/** Maps to the pre-provisioned {@code app_user} table owned by A (see V1 migration). */
+/** Maps to the IAM-owned {@code app_user} table. */
 @Entity
 @Table(name = "app_user")
 public class AppUser {
@@ -31,6 +31,12 @@ public class AppUser {
     protected AppUser() {
     }
 
+    public AppUser(String email, Long tenantId, String role) {
+        this.email = email;
+        this.tenantId = tenantId;
+        this.role = role;
+    }
+
     public Long getId() {
         return id;
     }
@@ -45,6 +51,10 @@ public class AppUser {
 
     public String getRole() {
         return role;
+    }
+
+    public void setRole(String role) {
+        this.role = role;
     }
 
     public String getGoogleSub() {

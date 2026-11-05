@@ -36,6 +36,25 @@ Lần đầu phải tải image, Gradle và dependency nên có thể mất hơn
 | `postgres` | `localhost:5432` | Database chung `hotelbooking` |
 | `adminer` | `http://127.0.0.1:8083` | Xem database qua trình duyệt |
 
+### Google đăng ký/đăng nhập App 1
+
+App 1 tự tạo tài khoản với role `USER` trong Tenant 1 khi một email Google đã xác minh tiếp tục lần đầu. App Admin (`:3001`) chỉ nhận email `IAM_ADMIN_EMAIL` (mặc định `diep44703@gmail.com`) và gán `ADMIN`; tài khoản này được tạo lần đầu khi đăng nhập Admin. Support (`:3002`) chỉ đăng nhập tài khoản đã có và lấy role `USER`/`ADMIN` từ IAM để bật đúng nghiệp vụ. `.env.local` cần `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SECURITY_JWT_ISSUER=http://localhost:8084` và `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI=http://iam-service:8084/.well-known/jwks.json`; hai giá trị cuối để Gateway và các service xác minh JWT do IAM ký. Sau khi chỉnh các biến, chạy từ thư mục `backend`:
+
+```bash
+docker compose --env-file .env.local --profile workflow up -d --build --wait
+```
+
+Xem [hướng dẫn build/rebuild đầy đủ](docs/build/README.md) để chạy stack, cập nhật code và xác nhận cấu hình IAM/JWKS.
+
+`IAM_ADMIN_EMAIL` mặc định là `diep44703@gmail.com`; có thể ghi đè bằng biến cùng tên trong `.env.local`. Dùng App 1 tại `http://localhost:3000` cho USER; dùng App Admin tại `http://localhost:3001` cho email admin; App Support tại `http://localhost:3002` sử dụng role đã lưu. Email và role khác nhau sẽ bị IAM từ chối ở App Admin. Tài khoản đã tồn tại giữ nguyên tenant; email admin cấu hình được nâng thành `ADMIN` khi đăng nhập đúng vào App Admin.
+
+Kiểm tra các tài khoản đã tạo:
+
+```bash
+docker exec -it hotelbooking-postgres psql -U hotelbooking -d hotelbooking -c \
+  "SELECT email, role, tenant_id, google_sub IS NOT NULL AS google_bound FROM app_user ORDER BY email;"
+```
+
 **Giới hạn:** JWT tạm kiểm tra API Gateway và backend authorization nhưng không kiểm tra Google login thật. Chỉ dùng trên máy local, không public port của token harness. Chi tiết ở [test/README.md](test/README.md).
 
 ### Test API bằng curl

@@ -1,5 +1,6 @@
 package com.hotelbooking.iam.security;
 
+import com.hotelbooking.iam.config.SsoProperties;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpStatus;
@@ -22,9 +23,11 @@ import java.io.IOException;
 public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHandler {
 
     private final SsoLoginService loginService;
+    private final SsoProperties ssoProperties;
 
-    public SsoAuthenticationSuccessHandler(SsoLoginService loginService) {
+    public SsoAuthenticationSuccessHandler(SsoLoginService loginService, SsoProperties ssoProperties) {
         this.loginService = loginService;
+        this.ssoProperties = ssoProperties;
     }
 
     @Override
@@ -32,16 +35,20 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
             HttpServletRequest request, HttpServletResponse response, Authentication authentication)
             throws IOException {
         Object appAttr = request.getSession().getAttribute(SsoLoginService.SESSION_APP_ATTR);
+        Object registerAttr = request.getSession().getAttribute(SsoLoginService.SESSION_REGISTER_ATTR);
         OidcUser oidcUser = extractOidcUser(authentication);
         if (!(appAttr instanceof String app) || oidcUser == null) {
-            deny(request, response, HttpStatus.BAD_REQUEST);
+            deny(request, response, HttpStatus.BAD_REQUEST, null);
             return;
         }
         try {
-            String redirectUrl = loginService.completeLogin(oidcUser, app);
+            String redirectUrl = loginService.completeLogin(oidcUser, app, Boolean.TRUE.equals(registerAttr));
             response.sendRedirect(redirectUrl);
         } catch (NotProvisionedException ex) {
-            deny(request, response, HttpStatus.FORBIDDEN);
+            String errorRedirect = ssoProperties.isAllowed(app)
+                    ? ssoProperties.callbackFor(app) + "#error=not_provisioned"
+                    : null;
+            deny(request, response, HttpStatus.FORBIDDEN, errorRedirect);
         }
     }
 
@@ -53,11 +60,16 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
         return null;
     }
 
-    private static void deny(HttpServletRequest request, HttpServletResponse response, HttpStatus status) {
-        // setStatus, not sendError: sendError forwards to "/error", which is not permitAll and
-        // would get hijacked by the OAuth2 entry point (redirecting to Google instead of 4xx).
+    private static void deny(
+            HttpServletRequest request, HttpServletResponse response, HttpStatus status, String redirectUrl)
+            throws IOException {
         SecurityContextHolder.clearContext();
         request.getSession().invalidate();
+        if (redirectUrl != null) {
+            response.setHeader("Cache-Control", "no-store");
+            response.sendRedirect(redirectUrl);
+            return;
+        }
         response.setStatus(status.value());
     }
 }

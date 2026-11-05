@@ -85,8 +85,11 @@ test("Every element id used by the script exists in the Support Center page", ()
   const html = fs.readFileSync(path.join(__dirname, "app3/index.html"), "utf8");
   const scripts = ["support.js", "auth.js"].map(file => fs.readFileSync(path.join(__dirname, file), "utf8")).join("\n");
   const used = [...scripts.matchAll(/getElementById\("([^"]+)"\)/g)].map(match => match[1]);
+  const optionalAuthElements = new Set(["register-button", "login-description", "login-actions", "logout-form", "app-content"]);
   assert.ok(used.length > 20);
-  for (const id of new Set(used)) assert.match(html, new RegExp('id="' + id + '"'), id);
+  for (const id of new Set(used)) {
+    if (!optionalAuthElements.has(id)) assert.match(html, new RegExp('id="' + id + '"'), id);
+  }
 });
 
 test("Static server serves the Support Center on port 3002", () => {

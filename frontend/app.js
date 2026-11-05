@@ -15,6 +15,13 @@
     const adminPortal = appId === "app2";
     const canManage = role === "ADMIN";
 
+    if (appId === "app1" && signedIn && role !== "USER") {
+      const appContent = doc.getElementById("app-content");
+      if (appContent) appContent.hidden = true;
+      doc.getElementById("integration-status").textContent = "App 1 chỉ dành cho tài khoản USER.";
+      return null;
+    }
+
     if (adminPortal) {
       const authorized = signedIn && canManage;
       doc.getElementById("catalog-section").hidden = !authorized;
@@ -40,7 +47,13 @@
       fetchFn,
       auth,
       onUnauthorized() {
-        doc.getElementById("login-status").textContent = api.sessionExpired;
+        if (typeof auth.expireSession === "function") auth.expireSession(api.sessionExpired);
+        else doc.getElementById("login-status").textContent = api.sessionExpired;
+        if (adminPortal) {
+          doc.getElementById("catalog-section").hidden = true;
+          doc.getElementById("bookings-section").hidden = true;
+          doc.getElementById("admin-section").hidden = true;
+        }
       }
     });
     const ctx = { client, role, tenantId: auth.getDisplayTenantId(), now };

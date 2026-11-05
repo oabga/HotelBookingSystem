@@ -88,6 +88,8 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-local-workflow-client-id}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-local-workflow-client-secret}
       SECURITY_JWT_ISSUER: http://localhost:8084
+      IAM_REGISTRATION_DEFAULT_TENANT_ID: ${IAM_REGISTRATION_DEFAULT_TENANT_ID:-1}
+      IAM_ADMIN_EMAIL: ${IAM_ADMIN_EMAIL:-diep44703@gmail.com}
     ports:
       - "127.0.0.1:8084:8084"
     healthcheck:

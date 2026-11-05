@@ -19,6 +19,7 @@ import java.util.Objects;
 public class SsoLoginService {
 
     public static final String SESSION_APP_ATTR = "sso_app";
+    public static final String SESSION_REGISTER_ATTR = "sso_register";
 
     private final AppUserRepository appUserRepository;
     private final JwtIssuer jwtIssuer;
@@ -30,32 +31,80 @@ public class SsoLoginService {
         this.ssoProperties = ssoProperties;
     }
 
-    /**
-     * Validates the Google identity against the provisioned {@code app_user}, binds/checks
-     * {@code google_sub}, mints a JWT and returns the full redirect URL for the given app
-     * (callback base URL + {@code #token=...}).
-     *
-     * @throws NotProvisionedException when the login must not result in a JWT (403 at IAM)
-     */
-    public String completeLogin(OidcUser oidcUser, String app) {
+    /** Validates the identity and enforces each app's provisioning and role policy. */
+    @Transactional
+    public String completeLogin(OidcUser oidcUser, String app, boolean register) {
         if (!ssoProperties.isAllowed(app)) {
             throw new NotProvisionedException();
         }
-        String token = issueToken(oidcUser);
+        if (register && !"app1".equals(app)) {
+            throw new NotProvisionedException();
+        }
+        String token = issueToken(oidcUser, app);
         return ssoProperties.callbackFor(app) + "#token=" + token;
     }
 
+    /** Login-only overload retained for callers that do not expose registration. */
+    public String completeLogin(OidcUser oidcUser, String app) {
+        return completeLogin(oidcUser, app, false);
+    }
+
     @Transactional
-    public String issueToken(OidcUser oidcUser) {
+    public String issueToken(OidcUser oidcUser, String app) {
         String email = oidcUser.getEmail();
         Boolean emailVerified = oidcUser.getEmailVerified();
         if (email == null || email.isBlank() || emailVerified == null || !emailVerified) {
             throw new NotProvisionedException();
         }
         String normalizedEmail = email.strip().toLowerCase(Locale.ROOT);
-        AppUser user = appUserRepository.findByEmail(normalizedEmail).orElseThrow(NotProvisionedException::new);
+        String configuredAdminEmail = normalize(ssoProperties.getRegistration().getAdminEmail());
+        boolean configuredAdmin = !configuredAdminEmail.isBlank() && normalizedEmail.equals(configuredAdminEmail);
+        AppUser user = appUserRepository.findByEmail(normalizedEmail).orElse(null);
+
+        if ("app1".equals(app)) {
+            // App 1 is the self-service USER portal. The configured administrator must use App 2.
+            if (configuredAdmin) throw new NotProvisionedException();
+            if (user == null) user = createUser(normalizedEmail, "USER");
+            if (!"USER".equals(user.getRole())) throw new NotProvisionedException();
+        } else if ("app2".equals(app)) {
+            // Only the exact, Google-verified allowlisted identity can receive the ADMIN role.
+            if (!configuredAdmin) throw new NotProvisionedException();
+            if (user == null) user = createUser(normalizedEmail, "ADMIN");
+            user.setRole("ADMIN");
+        } else if ("app3".equals(app)) {
+            // Support does not create accounts; it issues the role already stored in IAM.
+            if (user == null || !("USER".equals(user.getRole()) || "ADMIN".equals(user.getRole()))) {
+                throw new NotProvisionedException();
+            }
+        } else if (app == null) {
+            // Compatibility entry point for service-level callers; existing accounts only.
+            if (user == null) throw new NotProvisionedException();
+        } else {
+            throw new NotProvisionedException();
+        }
         bindOrVerifyGoogleSub(user, oidcUser.getSubject());
+        if ("app2".equals(app)) appUserRepository.save(user);
         return jwtIssuer.issue(user);
+    }
+
+    private AppUser createUser(String email, String role) {
+        Long tenantId = ssoProperties.getRegistration().getDefaultTenantId();
+        if (tenantId == null) throw new NotProvisionedException();
+        return appUserRepository.save(new AppUser(email, tenantId, role));
+    }
+
+    /** Legacy registration switch now maps to the App 1 self-service entry point. */
+    public String issueToken(OidcUser oidcUser, boolean register) {
+        return issueToken(oidcUser, register ? "app1" : null);
+    }
+
+    /** Existing integrations remain login-only unless they explicitly request App 1 registration. */
+    public String issueToken(OidcUser oidcUser) {
+        return issueToken(oidcUser, (String) null);
+    }
+
+    private static String normalize(String email) {
+        return email == null ? "" : email.strip().toLowerCase(Locale.ROOT);
     }
 
     private void bindOrVerifyGoogleSub(AppUser user, String googleSub) {

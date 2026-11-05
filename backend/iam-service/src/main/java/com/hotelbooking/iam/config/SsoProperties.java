@@ -10,6 +10,7 @@ import java.util.Map;
 public class SsoProperties {
 
     private Map<String, String> callbacks = new LinkedHashMap<>();
+    private Registration registration = new Registration();
 
     public Map<String, String> getCallbacks() {
         return callbacks;
@@ -19,11 +20,40 @@ public class SsoProperties {
         this.callbacks = callbacks;
     }
 
+    public Registration getRegistration() {
+        return registration;
+    }
+
+    public void setRegistration(Registration registration) {
+        this.registration = registration;
+    }
+
     public boolean isAllowed(String app) {
         return app != null && callbacks.containsKey(app);
     }
 
     public String callbackFor(String app) {
         return callbacks.get(app);
+    }
+
+    public static class Registration {
+        private Long defaultTenantId = 1L;
+        private String adminEmail = "";
+
+        public Long getDefaultTenantId() {
+            return defaultTenantId;
+        }
+
+        public void setDefaultTenantId(Long defaultTenantId) {
+            this.defaultTenantId = defaultTenantId;
+        }
+
+        public String getAdminEmail() {
+            return adminEmail;
+        }
+
+        public void setAdminEmail(String adminEmail) {
+            this.adminEmail = adminEmail;
+        }
     }
 }
