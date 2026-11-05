@@ -1,8 +1,8 @@
 # StayHub frontend demo
 
-App 1, App 2 và Support Center là các trang HTML/JavaScript thuần ở ba origin. App 1 và App 2 gọi backend theo API Contract bản 3.0. Bản này đã bị xoá khỏi `main`; xem lại bằng `git show 45d964e^:backend/docs/original/api-contract.md`. Giao diện theo role trong JWT, không theo số ứng dụng. Frontend không xác minh chữ ký JWT và không tự chứng minh Google SSO.
+App 1, App Admin (còn gọi là App 2) và Support Center là các trang HTML/JavaScript thuần ở ba origin. Các trang gọi backend theo [API Contract](../backend/docs/documents/api-contract.md). Giao diện theo role trong JWT. Frontend không xác minh chữ ký JWT và không tự chứng minh Google SSO.
 
-## Chạy hai trang
+## Chạy các trang
 
 Cần Node.js. Từ thư mục gốc repository, chạy:
 
@@ -33,7 +33,7 @@ node --test frontend/*.test.js
 
 Test dùng DOM và `fetch` giả lập trong `test-support.js`: **MOCK ONLY**, không phải bằng chứng tích hợp.
 
-Muốn thử với backend thật mà chưa có Google login, xem profile `dev-test` trong `backend/README.md`. Profile này không có Gateway, nên phải chạy thêm `api-gateway` với `SECURITY_JWT_ISSUER=http://127.0.0.1:8090` và `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI=http://127.0.0.1:8090/.well-known/jwks.json`, rồi mở `http://localhost:3000/callback/#token=<token từ dev-token>`. Cách này không chứng minh Google SSO.
+Muốn thử với backend thật mà chưa có Google login, chạy `docker compose --profile workflow up -d --build --wait` trong `backend/`, lấy token từ `http://127.0.0.1:8090`, rồi mở `http://localhost:3000/callback/#token=<token từ dev-token>`. Cách này không chứng minh Google SSO.
 
 ## Giới hạn
 

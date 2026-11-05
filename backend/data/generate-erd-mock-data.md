@@ -2,16 +2,16 @@
 
 `generate-erd-mock-data.sh` inserts deterministic mock users and bookings into a local database that already has IAM, Catalog and Booking migrations. It recalculates `room_inventory.sold` from all active `PENDING_PAYMENT` and `CONFIRMED` bookings so the fixture demonstrates the ERD inventory invariant.
 
-The script replaces bookings owned by its dedicated `mock.*@stayhub.example.test` users and any Support tickets linked to those mock bookings. It leaves other users, bookings and tickets intact. It does not rebuild the Docker volume or create/alter tables.
+The script replaces bookings owned by its dedicated `mock.*@stayhub.example.test` users. It leaves other users and bookings intact. It does not rebuild the Docker volume or create/alter tables.
 
-The ERD marks Support as target design, not verified implementation. The SQL creates Support fixture rows only when both `support_ticket` and `ticket_message` already exist; otherwise it prints a notice and skips them. Hotel and room-type records come from the existing Catalog Flyway seed. The script uses the IDs in that migration rather than the ERD's illustrative room type ID 10, and it only inserts columns present in current migrations.
+The SQL still contains fixture rows for the old `support_ticket` and `ticket_message` tables. Support `V2` dropped those tables, so on a current database the script prints a notice and skips them, and it creates no date-change requests or notifications. Hotel and room-type records come from the existing Catalog Flyway seed. The script uses the IDs in that migration rather than the ERD's illustrative room type ID 10, and it only inserts columns present in current migrations.
 
 ## Run
 
-From any directory:
+From the repository root:
 
 ```bash
-bash /Volumes/DATA/JIKAY/src/project-demo/HotelBookingSystem/backend/data/generate-erd-mock-data.sh
+bash backend/data/generate-erd-mock-data.sh
 ```
 
 The runner checks the database container and required tables, runs the SQL in a single transaction, and prints booking status counts and inventory sold values. Re-running it replaces its own mock bookings and tickets.

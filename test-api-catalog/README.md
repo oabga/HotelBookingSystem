@@ -1,6 +1,6 @@
 # Catalog API Quick Check
 
-Trang này giúp thử trực tiếp 5 endpoint của `catalog-service` trong lúc IAM/Gateway chưa hoàn thiện.
+Trang này giúp thử trực tiếp 5 endpoint của `catalog-service` mà không cần đăng nhập Google. Docker Compose cũng dùng server này làm `dev-token`.
 
 **JWT do dev harness ký tạm**, issuer/JWKS cũng do harness cung cấp. Nó kiểm tra xác thực JWT, role và tenant ở Catalog, nhưng không kiểm tra Google login, IAM, Gateway hoặc CORS production. Khóa RSA được tạo mới trong RAM mỗi lần chạy; token chỉ ở memory của trang và hết hạn sau một giờ. Chỉ bind vào loopback `127.0.0.1`.
 
@@ -9,14 +9,14 @@ Trang này giúp thử trực tiếp 5 endpoint của `catalog-service` trong l�
 Terminal 1 — từ thư mục này:
 
 ```bash
-cd /Volumes/DATA/JIKAY/src/project-demo/HotelBookingSystem/test-api-catalog
+cd test-api-catalog
 node server.mjs
 ```
 
 Terminal 2 — từ `backend/`, khởi động Catalog với issuer/JWKS tạm của harness:
 
 ```bash
-cd /Volumes/DATA/JIKAY/src/project-demo/HotelBookingSystem/backend
+cd backend
 SECURITY_JWT_ISSUER=http://127.0.0.1:8090 \
 SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI=http://127.0.0.1:8090/.well-known/jwks.json \
 ./gradlew :catalog-service:bootRun
@@ -37,7 +37,7 @@ Mở <http://127.0.0.1:8090>. Chọn role/tenant rồi bấm **Tạo token local
 Ngày mẫu bám theo seed đến hết `2027-01-31`. Sau khi POST tạo loại phòng hoặc PUT sửa giá, dữ liệu DB đã đổi. Reset toàn bộ database demo về seed ban đầu bằng lệnh dưới đây (lệnh xóa volume PostgreSQL):
 
 ```bash
-cd /Volumes/DATA/JIKAY/src/project-demo/HotelBookingSystem/backend
+cd backend
 docker compose down -v
 docker compose up -d postgres
 ./gradlew :iam-service:bootRun

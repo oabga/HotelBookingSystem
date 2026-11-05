@@ -1,742 +1,209 @@
+# StayHub — System Architecture
 
-# StayHub — System Architecture (3 Apps + Custom IAM)
+> **Cập nhật:** 05/11/2026, đối chiếu với `main` tại commit `1737b60`
+> **Trạng thái:** Mô tả hệ thống đang có trong code. Mức kiểm chứng xem [README.md](README.md#6-mức-độ-kiểm-chứng).
 
-> **Phiên bản:** 3-App Architecture  
-> **Cập nhật:** 04/11/2026  
-> **Trạng thái:** TARGET INTEGRATION — Chưa xác minh toàn bộ source code và E2E  
-> **Quyết định:** Giữ `iam-service` của developer làm Google OAuth2 Client, SSO Session Manager và JWT RS256 Issuer. **Không sử dụng Keycloak.**
+## 1. Tổng quan
 
----
+StayHub gồm ba frontend độc lập, một IAM tự xây dựng và bốn service nghiệp vụ dùng chung một PostgreSQL. Hệ thống không dùng Keycloak. IAM vừa là OAuth2 Client của Google, vừa quản lý phiên SSO, vừa phát hành JWT nội bộ. IAM không phải OIDC Authorization Server đầy đủ.
 
-## 1. Architecture Overview
+### 1.1. Công nghệ
 
-StayHub là hệ thống đặt phòng khách sạn theo kiến trúc microservices, gồm ba ứng dụng frontend độc lập sử dụng chung IAM Service và các backend services.
+| Lớp | Công nghệ |
+|---|---|
+| Frontend | HTML và JavaScript thuần, phục vụ bằng `frontend/server.js` (Node.js) |
+| Backend | Java 21, Spring Boot 3.3.5 |
+| Gateway | Spring Cloud Gateway (Spring Cloud 2023.0.3, reactive) |
+| Xác thực | Spring Security OAuth2 Client với Google OIDC, Authorization Code + PKCE S256 |
+| JWT | RS256, ký bằng Nimbus JOSE, xác minh bằng Spring Security Resource Server qua JWKS |
+| Database | PostgreSQL 16, Flyway |
+| Build | Gradle 9.8.2 |
+| Chạy local | Docker Compose, profile `workflow` |
+| Test | JUnit, Mockito, Testcontainers, `node --test` |
 
-Mục tiêu kiến trúc:
+Module `common-security` đã khai báo trong Gradle nhưng chưa có code. Mỗi service hiện tự có `SecurityConfig` và `StayHubJwtValidator`.
 
-- Xây dựng ba ứng dụng độc lập: Booking, Admin và Support.
-- Tái sử dụng IAM Service hiện tại, không viết lại authentication.
-- Triển khai Single Sign-On thông qua phiên đăng nhập chung tại IAM.
-- Phân quyền dựa trên hai role `USER` và `ADMIN`.
-- Cách ly dữ liệu theo `tenant_id`.
-- Đảm bảo booking và room inventory nhất quán trong transaction.
-- Duy trì khả năng kiểm thử riêng từng service và tích hợp end-to-end.
+## 2. Frontend
 
-### 1.1. Technology Stack
+Mỗi app là một origin riêng và chỉ giữ JWT trong bộ nhớ trang. Giao diện ẩn hoặc hiện theo role trong JWT chỉ để phục vụ trải nghiệm. Frontend không xác minh chữ ký và không phải lớp bảo mật.
 
-| Layer | Technology | Responsibility |
+| App | Chức năng đang có | API chính |
 |---|---|---|
-| Frontend | Web SPA, framework theo repository | Booking, Admin, Support |
-| Authentication | Spring Security OAuth2 Client | Google OAuth2/OIDC Login |
-| SSO | Spring Security + HttpSession | Duy trì phiên đăng nhập tại IAM |
-| Token Issuer | Custom IAM + RSA RS256 | Phát hành StayHub JWT |
-| Token Verification | Spring Security Resource Server + JWKS | Xác thực JWT tại Gateway và services |
-| API Gateway | Spring Cloud Gateway | API routing, gateway authentication |
-| Backend | Spring Boot | IAM, Catalog, Booking, Support |
-| Database | PostgreSQL | Lưu trữ dữ liệu nghiệp vụ |
-| Migration | Flyway | Quản lý database schema |
-| Build | Gradle | Build và quản lý dependencies |
+| App 1 `:3000` | Chọn khách sạn, tìm phòng, đặt phòng, xem đơn, thanh toán mô phỏng, hủy đơn, đăng xuất | `/api/hotels`, `/api/bookings` |
+| App Admin `:3001` | Xem tồn kho từng đêm, thêm loại phòng, sửa giá, xem đơn trong tenant | `/api/hotels`, `/api/admin/hotels`, `/api/room-types`, `/api/bookings` |
+| Support Center `:3002` | USER chọn đơn, xem báo giá đổi ngày, gửi phiếu, xem phiếu và thông báo. ADMIN xem hàng chờ, duyệt, từ chối | `/api/bookings/reschedulable`, `/api/bookings/{id}/reschedule-quote`, `/api/support`, `/api/notifications` |
 
-Các phiên bản công nghệ cụ thể cần đối chiếu với repository hiện tại.
+Hệ thống chưa có màn hình hoặc API để tạo, sửa khách sạn, cũng như sửa số phòng theo từng đêm. Chỉ App 1 có nút Đăng xuất.
 
----
-
-## 2. Frontend Applications
-
-Hệ thống có ba ứng dụng frontend chạy độc lập, sử dụng chung IAM nhưng có quyền truy cập và nghiệp vụ khác nhau.
-
-| Application | Development URL | Allowed Role | Responsibilities |
-|---|---|---|---|
-| Booking Web | `http://localhost:3000` | `USER` | Tìm phòng, đặt phòng, thanh toán mô phỏng, hủy đơn |
-| Admin Dashboard | `http://localhost:3001` | `ADMIN` | Quản lý khách sạn, loại phòng, giá, inventory và booking |
-| Support Center | `http://localhost:3002` | `USER`, `ADMIN` | Tạo, theo dõi và xử lý ticket hỗ trợ |
-
-Support Center là ứng dụng thứ ba cần triển khai, chưa được xác nhận đã tồn tại trong source code.
-
-### 2.1. Booking Web
-
-**Role:** `USER`
-
-Chức năng:
-
-- Đăng nhập Google thông qua IAM Service.
-- Xem khách sạn thuộc tenant.
-- Tìm kiếm loại phòng còn trống theo khoảng ngày.
-- Tạo booking.
-- Thanh toán mô phỏng.
-- Hủy booking đang chờ thanh toán.
-- Xem danh sách và chi tiết booking của mình.
-- Chuyển sang Support Center thông qua SSO.
-
-`ADMIN` không được tạo booking hoặc sử dụng các API đặt phòng dành cho `USER`.
-
-### 2.2. Admin Dashboard
-
-**Role:** `ADMIN`
-
-Chức năng:
-
-- Đăng nhập Google thông qua IAM Service.
-- Quản lý khách sạn.
-- Quản lý loại phòng và giá bán.
-- Quản lý số lượng phòng mở bán theo từng đêm.
-- Xem booking trong tenant.
-- Chuyển sang Support Center thông qua SSO.
-
-`USER` không được truy cập các API quản trị.
-
-### 2.3. Support Center
-
-**Role:** `USER`, `ADMIN`
-
-Support Center sử dụng chung IAM Session nhưng nhận JWT riêng khi thực hiện luồng đăng nhập vào ứng dụng.
-
-**USER:**
-
-- Tạo ticket hỗ trợ.
-- Liên kết ticket với booking thuộc quyền sở hữu.
-- Xem ticket của mình.
-- Gửi và nhận phản hồi.
-
-**ADMIN:**
-
-- Xem ticket thuộc tenant.
-- Phản hồi ticket.
-- Cập nhật trạng thái xử lý.
-- Theo dõi danh sách yêu cầu hỗ trợ.
-
-Không tạo thêm role `SUPPORT` trong phạm vi hiện tại.
-
----
-
-## 3. High-Level Component Architecture
+## 3. Thành phần
 
 ```mermaid
 flowchart TB
-    G["Google Identity Provider<br/>OAuth2 / OIDC"]
-
-    subgraph FE["Frontend Applications"]
-        B["Booking Web<br/>:3000<br/>USER"]
-        A["Admin Dashboard<br/>:3001<br/>ADMIN"]
-        S["Support Center<br/>:3002<br/>USER + ADMIN"]
+    G["Google OIDC"]
+    subgraph FE["Frontend"]
+        A1["App 1 :3000"]
+        A2["App Admin :3001"]
+        A3["Support Center :3002"]
     end
-
-    subgraph AUTH["Identity & Access Management"]
-        IAM["IAM Service :8084<br/>Google OAuth2 Client<br/>PKCE S256<br/>HttpSession SSO<br/>JWT RS256 + JWKS"]
-    end
-
-    subgraph BE["Backend Services"]
-        GW["API Gateway :8080"]
-        C["Catalog Service :8081"]
-        BK["Booking Service :8082"]
-        SP["Support Service<br/>Port TBD"]
-    end
-
+    IAM["IAM :8084<br/>Google login, HttpSession SSO<br/>JWT RS256, JWKS"]
+    GW["API Gateway :8080"]
+    C["Catalog :8081"]
+    B["Booking :8082"]
+    S["Support :8085"]
+    N["Notification :8083"]
     DB[("PostgreSQL<br/>hotelbooking")]
 
-    B -->|"Login: app1"| IAM
-    A -->|"Login: app2"| IAM
-    S -->|"Login: support"| IAM
-
-    IAM <-->|"Google OIDC"| G
-
-    B -->|"Bearer JWT"| GW
-    A -->|"Bearer JWT"| GW
-    S -->|"Bearer JWT"| GW
-
+    A1 -->|"/auth/start?app=app1"| IAM
+    A2 -->|"/auth/start?app=app2"| IAM
+    A3 -->|"/auth/start?app=app3"| IAM
+    IAM <-->|"OIDC"| G
+    A1 -->|"Bearer JWT"| GW
+    A2 -->|"Bearer JWT"| GW
+    A3 -->|"Bearer JWT"| GW
     GW --> C
-    GW --> BK
-    GW --> SP
-
-    GW -.->|"JWKS verification"| IAM
-    C -.->|"JWKS verification"| IAM
-    BK -.->|"JWKS verification"| IAM
-    SP -.->|"JWKS verification"| IAM
-
+    GW --> B
+    GW --> S
+    GW --> N
+    S -->|"HTTP, JWT của người thao tác"| B
+    GW -.->|"JWKS"| IAM
+    C -.->|"JWKS"| IAM
+    B -.->|"JWKS"| IAM
+    S -.->|"JWKS"| IAM
+    N -.->|"JWKS"| IAM
     IAM --> DB
     C --> DB
-    BK --> DB
-    SP --> DB
+    B --> DB
+    S --> DB
+    N --> DB
 ```
 
-### 3.1. Architecture Principles
+Nguyên tắc:
 
-1. Frontend không trực tiếp xác thực Google ID Token để cấp quyền nghiệp vụ.
-2. IAM Service là thành phần duy nhất phát hành StayHub JWT.
-3. Gateway và từng backend service xác minh JWT độc lập.
-4. Backend không gọi IAM đồng bộ cho mỗi business request.
-5. Role và tenant phải được xác thực ở backend.
-6. Frontend không được tự quyết định quyền truy cập API.
-7. Các services có trách nhiệm ghi dữ liệu rõ ràng dù dùng chung database.
+1. Chỉ IAM phát hành JWT. Service không dùng Google ID Token.
+2. Service xác minh JWT bằng public key trong cache, không gọi IAM ở mỗi request.
+3. Gateway không thay thế việc kiểm tra ở service. Gọi thẳng vào cổng service vẫn phải có JWT hợp lệ.
+4. Booking là nơi duy nhất đổi `booking` và `room_inventory.sold`, nên Support phải gọi Booking qua HTTP.
 
----
+## 4. Trách nhiệm của từng service
 
-## 4. Backend Services & Responsibilities
+### 4.1. IAM
 
-| Service | Port | Data Ownership | Responsibilities |
-|---|---|---|---|
-| `iam-service` | `8084` | `tenant`, `app_user` | Authentication, SSO, JWT, JWKS |
-| `api-gateway` | `8080` | Không sở hữu dữ liệu nghiệp vụ | Routing, JWT validation |
-| `catalog-service` | `8081` | `hotel`, `room_type`, `room_inventory.total` | Catalog, availability, inventory |
-| `booking-service` | `8082` | `booking`, `room_inventory.sold` | Booking, payment, cancel, expiry |
-| `support-service` | TBD | `support_ticket`, `ticket_message` | Ticket management, support workflows |
-
-### 4.1. IAM Service
-
-IAM Service thực hiện:
-
-- Google OAuth2/OIDC login.
-- Authorization Code Flow và PKCE S256.
-- Quản lý phiên xác thực qua `HttpSession`.
-- Kiểm tra tài khoản đã được provision.
-- Kiểm tra `email_verified`.
-- Binding Google identity bằng `google_sub`.
-- Phát hành JWT RS256.
-- Cung cấp public key thông qua JWKS.
-- Điều hướng về callback của ứng dụng được allowlist.
-
-IAM hiện tại **không phải OIDC Authorization Server đầy đủ**.
+Xử lý Google login, áp dụng chính sách theo app, tạo tài khoản khi chính sách cho phép, gắn `google_sub`, ký JWT, cung cấp JWKS và đăng xuất. Chi tiết ở [iam-sso.md](iam-sso.md).
 
 ### 4.2. API Gateway
 
-API Gateway chịu trách nhiệm:
+Áp dụng CORS, cho `OPTIONS` đi qua không cần JWT, và yêu cầu JWT hợp lệ với mọi request khác. Gateway kiểm tra chữ ký RS256, `iss`, hạn dùng và các claim bắt buộc, nhưng không xét role. Sau đó Gateway bỏ tiền tố `/api` và chuyển tiếp nguyên header `Authorization`.
 
-- Nhận API requests từ ba frontend.
-- Kiểm tra JWT hợp lệ.
-- Xác minh issuer, expiration và các claims bắt buộc.
-- Routing tới backend service tương ứng.
-- Áp dụng authorization ở gateway theo endpoint khi cần.
-
-Gateway không thay thế authorization tại business services.
-
-### 4.3. Catalog Service
-
-Catalog Service chịu trách nhiệm:
-
-- Quản lý `hotel`.
-- Quản lý `room_type`.
-- Quản lý giá phòng.
-- Tạo các dòng `room_inventory`.
-- Quản lý `room_inventory.total`.
-- Tìm kiếm loại phòng còn trống theo khoảng ngày.
-
-Catalog không trực tiếp tạo booking và không cập nhật `room_inventory.sold` trong nghiệp vụ đặt phòng.
-
-### 4.4. Booking Service
-
-Booking Service chịu trách nhiệm:
-
-- Tạo booking.
-- Kiểm tra lại availability khi đặt.
-- Cập nhật `room_inventory.sold`.
-- Quản lý booking lifecycle.
-- Xử lý thanh toán mô phỏng.
-- Xử lý cancellation và expiry.
-- Hoàn tồn kho khi booking bị hủy hoặc hết hạn.
-
-Booking phải cập nhật tồn kho và booking trong cùng database transaction.
-
-### 4.5. Support Service
-
-Support Service là thành phần mở rộng cho ứng dụng thứ ba.
-
-Trách nhiệm dự kiến:
-
-- Tạo và quản lý ticket.
-- Quản lý message trong ticket.
-- Kiểm tra quyền truy cập theo role.
-- Kiểm tra ticket ownership.
-- Cách ly ticket theo tenant.
-- Liên kết ticket với booking khi cần.
-
-Support Service phải xác minh JWT độc lập bằng IAM JWKS.
-
----
-
-## 5. IAM Architecture
-
-### 5.1. Authentication Contract
-
-Giữ nguyên các thành phần IAM developer đang triển khai:
-
-| Component | Responsibility |
+| Đường dẫn | Service |
 |---|---|
-| `AuthController` | Khởi tạo login theo app |
-| `SsoProperties` | Quản lý callback allowlist |
-| `SsoLoginService` | Kiểm tra identity và tài khoản nội bộ |
-| `SsoAuthenticationSuccessHandler` | Hoàn tất login và redirect |
-| `JwtIssuer` | Phát hành JWT RS256 |
-| `JwtKeyProvider` | Quản lý RSA keypair |
-| `JwksController` | Cung cấp public JWKS |
-| `SecurityConfig` | Cấu hình Spring Security và OAuth2 |
+| `/api/hotels/**`, `/api/room-types/**`, `/api/admin/**` | Catalog |
+| `/api/bookings/**` | Booking |
+| `/api/support/**` | Support |
+| `/api/notifications/**` | Notification |
 
-### 5.2. Authentication Endpoints
+Gateway không có route `/auth/**`. CORS chỉ cho phép ba origin của frontend, các method `GET`, `POST`, `PUT`, `OPTIONS` và các header `Authorization`, `Content-Type`.
 
-| Endpoint | Purpose |
-|---|---|
-| `GET /auth/start?app=app1` | Khởi tạo login Booking |
-| `GET /auth/start?app=app2` | Khởi tạo login Admin |
-| `GET /auth/start?app=support` | Khởi tạo login Support — cần bổ sung |
-| `/oauth2/authorization/google` | Bắt đầu Google authorization |
-| `/login/oauth2/code/google` | Google OAuth2 callback |
-| `GET /.well-known/jwks.json` | Public keys để xác minh JWT |
+### 4.3. Catalog
 
-Giữ tên `app1` và `app2` nếu đây là contract frontend/IAM hiện tại.
+Trả danh sách khách sạn theo tenant, tìm loại phòng còn trống, và cho ADMIN xem tồn kho, thêm loại phòng, sửa giá. Khi thêm loại phòng, Catalog tạo tồn kho từ hôm nay đến `2027-01-31`. Ngày cuối đang viết cứng trong SQL.
 
-Không đổi sang `booking` và `admin` nếu chưa cập nhật đồng bộ IAM configuration, frontend và tests.
+### 4.4. Booking
 
-### 5.3. Authentication Sequence
+Giữ tồn kho và tạo đơn trong một transaction, xác nhận thanh toán mô phỏng, hủy đơn, chạy job hết hạn và đổi ngày. Booking đọc thẳng `room_type`, `hotel` và ghi thẳng `room_inventory.sold`, không gọi Catalog.
 
-```mermaid
-sequenceDiagram
-    autonumber
+### 4.5. Support
 
-    actor U as User / Admin
-    participant FE as Frontend App
-    participant IAM as IAM Service
-    participant G as Google
-    participant DB as PostgreSQL
+Chỉ xử lý phiếu xin đổi ngày. Phần ticket và tin nhắn chung đã bị gỡ ở migration `V2`. Support gọi Booking bằng chính JWT của người đang thao tác, không có tài khoản dịch vụ. Timeout là 3 giây khi kết nối và 10 giây khi đọc.
 
-    U->>FE: Login with Google
-    FE->>IAM: GET /auth/start?app=app1|app2|support
+### 4.6. Notification
 
-    IAM->>IAM: Validate app allowlist
-    IAM->>IAM: Check HttpSession
+Một job đọc `notification_outbox` và tạo `notification`, sau đó USER đọc qua API. Hệ thống chưa có email hay push, và không có API tạo thông báo.
 
-    alt No authenticated IAM session
-        IAM-->>U: Redirect to Google OAuth2
-        U->>G: Authorization Code + PKCE S256
-        G-->>IAM: Authorization Code
-        IAM->>G: Exchange code using code_verifier
-        G-->>IAM: Google identity / ID Token
-    else Valid authenticated IAM session
-        IAM->>IAM: Reuse authenticated OidcUser
-    end
+## 5. JWT
 
-    IAM->>DB: Validate app_user and google_sub
-    DB-->>IAM: User, role, tenant
-
-    IAM->>IAM: Validate app-role policy
-
-    alt Authentication or authorization denied
-        IAM-->>U: Controlled error / 403
-    else Authorized
-        IAM->>IAM: Sign StayHub JWT RS256
-        IAM-->>FE: 302 callback/#token=JWT
-        FE->>FE: Read token and clear URL fragment
-        FE-->>U: Open application
-    end
-```
-
-**Implementation note:** App-role enforcement và callback Support là các phần cần bổ sung, chưa được xác nhận đã triển khai.
-
----
-
-## 6. JWT Architecture
-
-### 6.1. JWT Claims
-
-IAM Service phát hành JWT RS256 với các claims:
-
-| Claim | Value |
+| Claim | Giá trị |
 |---|---|
 | `iss` | `http://localhost:8084` |
-| `sub` | `app_user.id` |
-| `email` | Email đã xác thực |
-| `tenant_id` | Numeric tenant ID |
+| `sub` | `app_user.id`, dạng chuỗi |
+| `email` | Email trong `app_user` |
+| `tenant_id` | Số nguyên dương |
 | `role` | `USER` hoặc `ADMIN` |
-| `iat` | Issued-at timestamp |
-| `exp` | Expiration timestamp |
+| `iat`, `exp` | Hạn 15 phút |
 
-Theo tài liệu IAM developer, JWT có TTL khoảng **15 phút**.
-
-### 6.2. JWT Validation Flow
+JWT không có `aud`. Thiếu hoặc sai một claim bắt buộc đều trả `401`. JWT có thể đọc được nội dung vì chỉ được ký, không được mã hóa.
 
 ```mermaid
 sequenceDiagram
     autonumber
-
-    participant FE as Frontend
-    participant GW as API Gateway
-    participant JWKS as IAM JWKS
-    participant SV as Business Service
-
-    FE->>GW: API Request + Bearer JWT
-
-    GW->>JWKS: Fetch public JWKS if not cached
-    JWKS-->>GW: RSA Public Key
-
-    GW->>GW: Verify signature, issuer, expiry, claims
-
-    alt Invalid JWT
-        GW-->>FE: 401 Unauthorized
-    else Valid JWT
-        GW->>SV: Forward request with JWT
-        SV->>SV: Independently validate JWT
-        SV->>SV: Check role, tenant, ownership
-
-        alt Forbidden
-            SV-->>FE: 403 or 404
-        else Authorized
-            SV-->>FE: Business response
-        end
+    participant FE as Trình duyệt
+    participant GW as Gateway
+    participant SV as Service
+    participant IAM as IAM JWKS
+    FE->>GW: Request + Bearer JWT
+    opt Gateway gặp kid chưa có trong cache
+        GW->>IAM: GET /.well-known/jwks.json
+    end
+    GW->>GW: Kiểm tra chữ ký, iss, exp, claim
+    alt JWT sai
+        GW-->>FE: 401
+    else JWT đúng
+        GW->>SV: Chuyển tiếp nguyên header
+        SV->>SV: Tự kiểm tra JWT, rồi xét role
+        SV-->>FE: 2xx, 403 hoặc 404
     end
 ```
 
-### 6.3. Security Rules
+## 6. Phân quyền
 
-- Không sử dụng Google ID Token làm StayHub API access token.
-- Không chia sẻ RSA private key với Gateway hoặc business services.
-- Public JWKS không được chứa private RSA parameters.
-- Không tin tưởng claims trước khi xác minh chữ ký.
-- Không tin tưởng tenant/role do client gửi.
-- Không dựa hoàn toàn vào Gateway để bảo vệ service.
-- JWKS có thể được cache để giảm latency và tránh gọi IAM trên mỗi request.
+Các lớp kiểm tra:
 
----
-
-## 7. Single Sign-On Across 3 Apps
-
-### 7.1. SSO Principle
-
-SSO sử dụng `HttpSession` tại IAM Service.
-
-Khi một người dùng đã đăng nhập thành công vào Booking hoặc Admin, trình duyệt có thể sử dụng phiên IAM hiện tại để đăng nhập Support Center mà không cần nhập lại mật khẩu Google.
-
-Mỗi frontend vẫn nhận JWT riêng.
-
-### 7.2. Booking → Support
-
-```mermaid
-sequenceDiagram
-    autonumber
-
-    actor U as USER
-    participant B as Booking :3000
-    participant IAM as IAM :8084
-    participant S as Support :3002
-
-    U->>B: Already authenticated
-    U->>S: Open Support Center
-
-    S->>IAM: GET /auth/start?app=support
-    IAM->>IAM: Read existing HttpSession
-    IAM->>IAM: Revalidate identity and USER role
-    IAM->>IAM: Issue new JWT
-
-    IAM-->>S: Redirect /callback/#token=JWT
-    S->>S: Store token in memory
-    S-->>U: Show USER support interface
-```
-
-### 7.3. Admin → Support
-
-```mermaid
-sequenceDiagram
-    autonumber
-
-    actor A as ADMIN
-    participant D as Admin Dashboard :3001
-    participant IAM as IAM :8084
-    participant S as Support :3002
-
-    A->>D: Already authenticated
-    A->>S: Open Support Center
-
-    S->>IAM: GET /auth/start?app=support
-    IAM->>IAM: Reuse authenticated session
-    IAM->>IAM: Revalidate ADMIN role
-    IAM->>IAM: Issue new JWT
-
-    IAM-->>S: Redirect /callback/#token=JWT
-    S-->>A: Show ADMIN support interface
-```
-
-### 7.4. SSO vs Authorization
-
-**SSO** trả lời câu hỏi:
-
-> Người dùng đã được xác thực hay chưa?
-
-**Authorization** trả lời câu hỏi:
-
-> Người dùng được phép thực hiện nghiệp vụ nào?
-
-| Scenario | Expected Result |
+| Lớp | Kiểm tra |
 |---|---|
-| USER → Booking | Allowed |
-| USER → Admin | Denied |
-| USER → Support | Allowed |
-| ADMIN → Booking | Denied |
-| ADMIN → Admin | Allowed |
-| ADMIN → Support | Allowed |
+| IAM | Tài khoản có được nhận JWT cho app này không |
+| Gateway | JWT hợp lệ |
+| Service | JWT hợp lệ, role theo endpoint, tenant, chủ sở hữu |
+| PostgreSQL | Khóa ngoại theo tenant, CHECK, UNIQUE |
 
-SSO không cho phép người dùng vượt qua role restrictions.
+Support và Notification còn đối chiếu email, tenant và role trong JWT với `app_user`. Không khớp thì trả `403`, nên JWT cũ của người vừa đổi role sẽ bị chặn ở hai service này.
 
----
-
-## 8. Authorization Architecture
-
-Authorization được triển khai theo nhiều lớp.
-
-```text id="ewmdv2"
-Frontend
-    |
-    | UI Role Guard (UX only)
-    v
-IAM
-    |
-    | App Access Policy
-    v
-API Gateway
-    |
-    | JWT Validation
-    | Route Authorization
-    v
-Business Service
-    |
-    | JWT Validation
-    | RBAC
-    | Tenant Isolation
-    | Ownership
-    v
-PostgreSQL
-    |
-    | Foreign Keys
-    | Constraints
-    v
-Business Data
-```
-
-### 8.1. RBAC Matrix
-
-| Resource / Action | USER | ADMIN |
+| Nghiệp vụ | USER | ADMIN |
 |---|---|---|
-| Booking Web | Allow | Deny |
-| Admin Dashboard | Deny | Allow |
-| Support Center | Allow | Allow |
-| Hotel Search | Allow | Allow |
-| Room Availability | Allow | Allow |
-| Create Booking | Allow | Deny |
-| Mock Payment | Own Booking | Deny |
-| Cancel Booking | Own Booking | Deny |
-| Manage Hotel | Deny | Allow |
-| Manage Room Type | Deny | Allow |
-| Manage Inventory | Deny | Allow |
-| Read Booking | Own Booking | Tenant Scope |
-| Create Support Ticket | Allow | Not in current scope |
-| Read Support Ticket | Own Ticket | Tenant Scope |
-| Resolve Support Ticket | Deny | Allow |
+| Xem khách sạn, tìm phòng | Có | Có |
+| Đặt phòng, thanh toán, hủy đơn | Đơn của mình | Không |
+| Xem đơn | Đơn của mình | Trong tenant |
+| Xem tồn kho, thêm loại phòng, sửa giá | Không | Trong tenant |
+| Danh sách đơn đổi được ngày | Đơn của mình | Không |
+| Báo giá đổi ngày | Đơn của mình | Trong tenant |
+| Gửi phiếu đổi ngày | Đơn của mình | Không |
+| Xem phiếu | Phiếu của mình | Trong tenant |
+| Duyệt, từ chối phiếu | Không | Trong tenant |
+| Đổi ngày trực tiếp ở Booking | Không | Trong tenant |
+| Xem, đánh dấu đã đọc thông báo | Của mình | Của mình |
 
-### 8.2. Tenant Isolation
+Ma trận theo từng endpoint nằm ở [api-contract.md](api-contract.md).
 
-`tenant_id` phải được lấy từ JWT đã xác minh.
+## 7. Database
 
-Ví dụ:
+Mọi service dùng chung database `hotelbooking`, schema `public`. Mỗi service có lịch sử Flyway riêng. Dùng chung database giúp giữ tồn kho và tạo đơn trong một transaction mà không cần transaction phân tán. Đổi lại, các service phụ thuộc vào schema của nhau.
 
-```sql
-SELECT *
-FROM booking
-WHERE id = :bookingId
-  AND tenant_id = :tenantId;
-```
-
-Đối với USER, cần kiểm tra thêm quyền sở hữu:
-
-```sql
-SELECT *
-FROM booking
-WHERE id = :bookingId
-  AND tenant_id = :tenantId
-  AND user_email = :authenticatedEmail;
-```
-
-Không sử dụng `tenant_id` hoặc `user_email` do frontend gửi để quyết định quyền truy cập.
-
-### 8.3. HTTP Status Policy
-
-| Condition | HTTP Status |
-|---|---|
-| Missing/invalid/expired JWT | `401 Unauthorized` |
-| Valid JWT but insufficient role | `403 Forbidden` |
-| Resource not found | `404 Not Found` |
-| Resource belongs to another tenant or owner | `404 Not Found` |
-| Invalid request | `400 Bad Request` |
-| Booking inventory conflict | `409 Conflict` |
-
----
-
-## 9. Database Architecture
-
-### 9.1. Database Strategy
-
-Trong phạm vi demo, hệ thống sử dụng:
-
-- PostgreSQL database: `hotelbooking`.
-- Schema: `public`.
-- Flyway migrations.
-- Service-level data ownership.
-- Transaction nội bộ cho booking và inventory.
-
-Việc dùng chung database giúp Booking cập nhật `room_inventory.sold` và tạo booking trong cùng transaction, tránh distributed transaction trong MVP.
-
-### 9.2. Database ERD
-
-```mermaid
-erDiagram
-    TENANT ||--o{ APP_USER : contains
-    TENANT ||--o{ HOTEL : owns
-    TENANT ||--o{ BOOKING : owns
-
-    HOTEL ||--o{ ROOM_TYPE : contains
-    ROOM_TYPE ||--o{ ROOM_INVENTORY : inventory
-    ROOM_TYPE ||--o{ BOOKING : booked_as
-
-    APP_USER ||--o{ BOOKING : booked_by_email
-
-    TENANT {
-        BIGINT id PK
-        VARCHAR name
-    }
-
-    APP_USER {
-        BIGINT id PK
-        VARCHAR email
-        BIGINT tenant_id FK
-        VARCHAR role
-        VARCHAR google_sub
-    }
-
-    HOTEL {
-        BIGINT id PK
-        BIGINT tenant_id FK
-        VARCHAR name
-        VARCHAR address
-    }
-
-    ROOM_TYPE {
-        BIGINT id PK
-        BIGINT tenant_id FK
-        BIGINT hotel_id FK
-        VARCHAR name
-        INT capacity
-        NUMERIC base_price
-        INT total_rooms
-    }
-
-    ROOM_INVENTORY {
-        BIGINT tenant_id PK
-        BIGINT room_type_id PK
-        DATE stay_date PK
-        INT total
-        INT sold
-    }
-
-    BOOKING {
-        BIGINT id PK
-        BIGINT tenant_id FK
-        BIGINT room_type_id FK
-        VARCHAR user_email FK
-        DATE check_in
-        DATE check_out
-        INT room_count
-        NUMERIC total_amount
-        VARCHAR status
-        TIMESTAMPTZ payment_expires_at
-        TIMESTAMPTZ created_at
-    }
-```
-
-Support tables được bổ sung khi Support Service được triển khai. Chi tiết schema và constraints nằm trong `data-model.md`.
-
-### 9.3. Data Ownership
-
-| Table | Schema/Migration Owner | Write Responsibility |
+| Bảng | Service ghi | Service chỉ đọc |
 |---|---|---|
-| `tenant` | IAM | IAM |
-| `app_user` | IAM | IAM |
-| `hotel` | Catalog | Catalog |
-| `room_type` | Catalog | Catalog |
-| `room_inventory.total` | Catalog | Catalog |
-| `room_inventory.sold` | Catalog schema / Booking business | Booking |
-| `booking` | Booking | Booking |
-| `support_ticket` | Support | Support |
-| `ticket_message` | Support | Support |
+| `tenant` | Seed của IAM | Khóa ngoại |
+| `app_user` | IAM | Support, Notification |
+| `hotel`, `room_type` | Catalog | Booking |
+| `room_inventory.total` | Catalog | Booking |
+| `room_inventory.sold` | Booking | Catalog |
+| `booking` | Booking | Khóa ngoại của Support |
+| `booking_reschedule` | Booking | Support |
+| `date_change_request` | Support | Không có |
+| `notification_outbox` | Support, Notification chỉ ghi `processed_at` | Notification |
+| `notification` | Notification | Không có |
 
----
+Schema chi tiết ở [erd.md](erd.md), quy tắc nghiệp vụ ở [data-model.md](data-model.md).
 
-## 10. Booking & Inventory Architecture
+## 8. Đặt phòng và tồn kho
 
-### 10.1. Inventory Model
-
-StayHub sử dụng inventory theo từng đêm.
-
-```text id="udssfv"
-room_inventory
-    |
-    +-- tenant_id
-    +-- room_type_id
-    +-- stay_date
-    +-- total
-    +-- sold
-```
-
-Số phòng còn trống:
-
-```text id="6v8ddm"
-available_rooms = total - sold
-```
-
-### 10.2. Availability Search
-
-Khi USER tìm phòng:
-
-1. Chọn khách sạn.
-2. Chọn `checkIn` và `checkOut`.
-3. Catalog đọc `room_type` và `room_inventory`.
-4. Kiểm tra inventory của tất cả các đêm.
-5. Trả về các loại phòng còn đủ số lượng.
-
-`checkOut` không được tính là đêm lưu trú.
-
-Điều kiện availability cốt lõi:
-
-```sql
-HAVING COUNT(*) = :nights
-   AND MIN(i.total - i.sold) > 0
-```
-
-### 10.3. Booking Transaction
-
-```mermaid
-sequenceDiagram
-    autonumber
-
-    actor U as USER
-    participant B as Booking Service
-    participant DB as PostgreSQL
-
-    U->>B: POST /api/bookings
-
-    B->>DB: BEGIN
-    B->>DB: Read room_type by tenant
-    B->>DB: Validate room type and price
-
-    loop Every stay date, ascending
-        B->>DB: Conditional UPDATE room_inventory.sold
-    end
-
-    alt Any inventory update fails
-        B->>DB: ROLLBACK
-        B-->>U: 409 Conflict
-    else All dates available
-        B->>DB: INSERT booking PENDING_PAYMENT
-        B->>DB: COMMIT
-        B-->>U: 201 Created
-    end
-```
-
-Câu lệnh cập nhật tồn kho:
+Tồn kho tính theo từng đêm của từng loại phòng, trong đó `available = total - sold`. Kỳ ở là khoảng `[checkIn, checkOut)`. Kết quả tìm phòng không giữ chỗ. Booking kiểm tra lại bằng `UPDATE` có điều kiện, xử lý các đêm theo ngày tăng dần, trong transaction `READ COMMITTED`:
 
 ```sql
 UPDATE room_inventory
@@ -747,259 +214,67 @@ WHERE tenant_id = :tenantId
   AND sold + :roomCount <= total;
 ```
 
-Nếu một đêm không cập nhật được đúng một dòng, transaction phải rollback.
-
-### 10.4. Concurrency Control
-
-- Sử dụng PostgreSQL transaction.
-- Thiết kế dựa trên isolation level `READ COMMITTED`.
-- Cập nhật tồn kho bằng conditional `UPDATE`.
-- Cập nhật các đêm theo thứ tự tăng dần.
-- Không cho phép overselling.
-- Kiểm tra inventory lại tại thời điểm đặt, không tin kết quả search trước đó.
-
-### 10.5. Booking Lifecycle
+Một đêm không đổi được đúng một dòng thì toàn bộ transaction rollback và trả `409`.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> PENDING_PAYMENT: Create booking
-
-    PENDING_PAYMENT --> CONFIRMED: Mock payment success
-    PENDING_PAYMENT --> CANCELLED: User cancels
-    PENDING_PAYMENT --> EXPIRED: Payment timeout
-
-    CONFIRMED --> [*]
-    CANCELLED --> [*]
-    EXPIRED --> [*]
+    [*] --> PENDING_PAYMENT: Đặt phòng, giữ tồn
+    PENDING_PAYMENT --> CONFIRMED: Thanh toán mô phỏng
+    PENDING_PAYMENT --> CANCELLED: USER hủy, trả tồn
+    PENDING_PAYMENT --> EXPIRED: Job hết hạn, trả tồn
 ```
 
-| Status | Inventory Reserved | Meaning |
-|---|---|---|
-| `PENDING_PAYMENT` | Yes | Waiting for payment |
-| `CONFIRMED` | Yes | Payment completed |
-| `CANCELLED` | No | Inventory released |
-| `EXPIRED` | No | Inventory released |
+Thời gian giữ phòng mặc định là 15 phút (`booking.payment.hold`), job hết hạn chạy mỗi 60 giây (`booking.expiry.interval`). Đơn `CONFIRMED` có thể đổi ngày nhưng hiện không hủy được.
 
-Thanh toán mô phỏng chỉ cập nhật trạng thái booking vì inventory đã được giữ khi tạo đơn.
+## 9. Đổi ngày
 
-Cancellation và expiry phải cập nhật trạng thái có điều kiện trước khi hoàn inventory, trong cùng transaction, nhằm tránh hoàn phòng hai lần.
+1. USER xem báo giá. Việc này chỉ đọc, chưa giữ phòng.
+2. USER gửi phiếu. Support gọi Booking để lấy báo giá, sau đó lưu phiếu `PENDING`. Mỗi đơn chỉ có một phiếu đang chờ.
+3. ADMIN duyệt. Support khóa dòng phiếu, gọi Booking kèm `requestId`, rồi ghi `APPROVED` và `notification_outbox` trong cùng transaction.
+4. Booking đổi tồn kho và đơn trong một transaction, đồng thời ghi `booking_reschedule`. Nếu hết phòng, Booking trả `409` và phiếu vẫn `PENDING`.
 
----
+Booking commit trước, Support ghi nhận sau. Nếu Support lỗi giữa hai bước, phiếu vẫn `PENDING` và ADMIN có thể duyệt lại an toàn, vì Booking bỏ qua `requestId` đã áp dụng. Từ chối phiếu trong trường hợp đó sẽ bị chặn bằng `409`.
 
-## 11. API Routing Architecture
+Tổng tiền mới tính theo giá mỗi đêm của đơn gốc, nên việc đổi giá phòng không ảnh hưởng đơn đã tạo. Chênh lệch chỉ được ghi nhận, không có thu thêm hay hoàn tiền thật.
 
-Frontend gọi backend thông qua API Gateway.
+## 10. Thông báo qua outbox
 
-| API | Service | Role |
-|---|---|---|
-| `GET /api/hotels` | Catalog | USER, ADMIN |
-| `GET /api/hotels/{hotelId}/availability` | Catalog | USER, ADMIN |
-| `POST /api/hotels/{hotelId}/room-types` | Catalog | ADMIN |
-| `PUT /api/room-types/{id}/price` | Catalog | ADMIN |
-| `GET /api/admin/hotels/{hotelId}/inventory` | Catalog | ADMIN |
-| `POST /api/bookings` | Booking | USER |
-| `POST /api/bookings/{id}/payment` | Booking | USER, owner |
-| `POST /api/bookings/{id}/cancel` | Booking | USER, owner |
-| `GET /api/bookings` | Booking | USER, ADMIN — scoped |
-| `GET /api/bookings/{id}` | Booking | USER, ADMIN — scoped |
-| Support ticket endpoints | Support | USER, ADMIN — scoped |
+Support ghi `notification_outbox` cùng transaction với kết quả duyệt hoặc từ chối. Job của Notification chạy mỗi 2 giây, đọc tối đa 100 dòng chưa xử lý bằng `FOR UPDATE SKIP LOCKED`, tạo `notification` và đánh dấu `processed_at` trong một transaction. `UNIQUE (source_event_id)` chặn tạo trùng.
 
-Chi tiết request, response và status codes được định nghĩa tại `api-contract.md`.
+Phiếu đã có kết quả thì sự kiện đã nằm trong database, nên Notification tắt cũng không mất thông báo. Support Center của USER gọi lại mỗi 15 giây.
 
----
-
-## 12. Migration Architecture
-
-### 12.1. Flyway Dependency Order
+## 11. Thứ tự migration
 
 ```mermaid
 flowchart LR
-    IAM["IAM<br/>tenant, app_user"]
-    CAT["Catalog<br/>hotel, room_type, room_inventory"]
-    BOOK["Booking<br/>booking"]
-    SUP["Support<br/>ticket, message"]
-
-    IAM --> CAT
-    CAT --> BOOK
-    BOOK --> SUP
+    I["IAM<br/>tenant, app_user"] --> C["Catalog<br/>hotel, room_type, room_inventory"]
+    C --> B["Booking<br/>booking, booking_reschedule"]
+    B --> S["Support<br/>date_change_request, notification_outbox"]
+    S --> N["Notification<br/>notification"]
 ```
 
-Thứ tự này thể hiện các phụ thuộc dữ liệu của thiết kế mục tiêu, không mặc định là startup order đã được cấu hình.
+Docker Compose bảo đảm thứ tự này bằng `depends_on`. Chạy bằng Gradle thì phải khởi động theo đúng thứ tự.
 
-Support cần được triển khai sau khi IAM và các bảng booking liên quan đã sẵn sàng nếu schema Support có foreign key tới booking.
+## 12. Giới hạn đã biết
 
-### 12.2. Known Migration Blocker
-
-Theo tài liệu developer, Booking migration hiện tại còn tham chiếu bảng `room` cũ.
-
-Trong khi đó, ERD v2 sử dụng:
-
-- `hotel`
-- `room_type`
-- `room_inventory`
-- `booking`
-
-Cần đồng bộ Catalog và Booking migrations trước khi chạy E2E.
-
-Với database demo chưa phát hành, có thể điều chỉnh migrations và tạo lại database sạch theo kế hoạch của team.
-
-Không chỉnh sửa migration đã áp dụng trên môi trường có dữ liệu thật nếu chưa có chiến lược migration tương thích.
-
----
-
-## 13. Minimal IAM Changes for 3 Apps
-
-Mục tiêu là mở rộng IAM hiện tại, không thay thế implementation của developer.
-
-### 13.1. Required Changes
-
-**IAM Developer:**
-
-1. Bổ sung `support` vào callback allowlist.
-2. Giữ `app1` và `app2` nếu đang được sử dụng.
-3. Bổ sung role-to-app authorization.
-4. Tái sử dụng HttpSession SSO cho Support.
-5. Phát JWT mới khi chuyển sang Support.
-6. Bổ sung unit/integration tests cho app thứ ba.
-
-**Frontend Developer:**
-
-1. Booking sử dụng `app1`.
-2. Admin sử dụng `app2`.
-3. Support sử dụng `support`.
-4. Xử lý callback JWT theo cơ chế hiện tại.
-5. Không chia sẻ token trực tiếp giữa các ứng dụng.
-
-**Support Developer:**
-
-1. Triển khai Support Service.
-2. Cấu hình JWT Resource Server với IAM JWKS.
-3. Triển khai ticket schema và Flyway.
-4. Triển khai RBAC, tenant isolation và ownership.
-5. Tích hợp Support API qua Gateway.
-
-### 13.2. IAM App Access Policy
-
-| App Identifier | Frontend | Allowed Role |
+| Giới hạn | Hệ quả | Hướng xử lý |
 |---|---|---|
-| `app1` | Booking | USER |
-| `app2` | Admin | ADMIN |
-| `support` | Support Center | USER, ADMIN |
+| IAM tạo RSA key mới khi khởi động nhưng giữ nguyên `kid = stayhub-key-1` | Service đang cache key cũ từ chối JWT mới. Đo bằng bản sao `dev-token` cố định `kid`: Catalog, Booking, Support hồi phục sau khoảng 5 phút, Gateway vẫn trả `401` sau 13 phút và chỉ hết khi restart Gateway. JWT ký bằng key cũ vẫn được chấp nhận trong lúc đó | Tạo `kid` theo từng key. Về lâu dài lưu key bền vững và có xoay vòng |
+| `IAM_ADMIN_EMAIL` chỉ có một email | ADMIN khác chỉ dùng được Support, và chỉ một tenant có người vào App Admin. Không đặt biến này thì không ai vào được App Admin | Quản lý quyền App Admin theo role và tenant |
+| Compose đặt sẵn một email cá nhân làm `IAM_ADMIN_EMAIL` mặc định | Ai dùng cấu hình mặc định cũng phụ thuộc email đó | Bắt buộc khai báo trong `.env.local` |
+| Compose mặc định dùng `dev-token` | Không đặt lại issuer và JWKS thì JWT thật của IAM bị `401` | Xem [operations-and-tests.md](operations-and-tests.md#2-cấu-hình) |
+| JWT nằm trong URL fragment và bộ nhớ trang | XSS đọc được JWT. Tải lại trang là mất JWT | Dùng BFF và cookie HttpOnly nếu lên production |
+| Chưa có refresh token và thu hồi JWT | JWT còn hiệu lực đến khi hết hạn, kể cả sau đăng xuất hay đổi role | Quyết định riêng trước production |
+| Đăng xuất chỉ ở App 1, không báo các tab khác | Tab khác vẫn dùng được JWT đến khi hết hạn | Xem `OPEN-002` trong [decisions.md](decisions.md) |
+| `sso_app` nằm chung trong session | Hai tab đăng nhập song song có thể bị trả về nhầm app | Gắn app đích với từng authorization request |
+| Mọi lỗi chính sách đều là `#error=not_provisioned` | Frontend có thể báo sai nguyên nhân | Trả mã lỗi riêng |
+| Chính sách theo app chưa có test | Logic đăng nhập mới không được test bảo vệ | Bổ sung test cho `SsoLoginService` |
+| Booking chưa có idempotency key | Gửi lại request có thể tạo đơn thứ hai. Frontend khóa nút để giảm rủi ro | Thêm `Idempotency-Key` |
+| Giá lấy tại thời điểm đặt | Đơn theo giá mới nếu ADMIN đổi giá ngay sau khi người dùng xem | Gửi giá đã xem để đối chiếu |
+| Tồn kho có ngày cuối cố định `2027-01-31` | Sau ngày đó đặt phòng nhận `409` | Có job mở bán cuốn chiếu |
+| Support giữ transaction và khóa phiếu trong lúc gọi Booking | Booking chậm giữ khóa và một kết nối DB tối đa khoảng 13 giây | Tách bước gọi HTTP khỏi transaction |
+| ADMIN gọi thẳng `POST /api/bookings/{id}/reschedule` được | Đổi được ngày mà không qua phiếu | Chấp nhận vì ADMIN đã có quyền duyệt |
+| Phiếu chờ không tự hết hạn | Duyệt sau ngày nhận phòng sẽ nhận `409` | ADMIN từ chối phiếu |
+| Dùng chung database, đơn giữ theo `user_email` | Các service phụ thuộc schema của nhau. Đổi email ảnh hưởng quyền sở hữu đơn | Đánh giá khi tách service |
 
-Không nhận callback URL tùy ý từ client để tránh open redirect.
-
----
-
-## 14. Security Limitations & Technical Debt
-
-| Risk | Current Design | Required Follow-up |
-|---|---|---|
-| JWT in URL fragment | Demo-only | Secure token delivery / BFF |
-| Token in frontend memory | Demo-only | Define production session strategy |
-| RSA keypair reset on restart | Theo tài liệu dev | Persistent keys and rotation |
-| Missing refresh/revocation | Chưa triển khai đầy đủ | Token lifecycle design |
-| IAM logout | Chưa hoàn thiện | Single Logout design |
-| Shared `sso_app` session attribute | Multi-tab race risk | Bind destination to authorization request/state |
-| JWT role changes | Token may remain valid until expiry | Revocation / short TTL strategy |
-| Booking duplicate requests | No idempotency key in ERD v2 | Add idempotency mechanism |
-| Shared database | MVP trade-off | Enforce service write ownership |
-| Support authorization | Proposed | Implement and test tenant/owner checks |
-
-Các giới hạn này phải được ghi nhận khi demo, không được mô tả là production-ready.
-
----
-
-## 15. Integration & Acceptance Criteria
-
-### 15.1. Authentication & SSO
-
-- [ ] USER đăng nhập Booking thành công.
-- [ ] ADMIN đăng nhập Admin thành công.
-- [ ] USER chuyển Booking → Support không cần đăng nhập Google lại khi IAM session còn hiệu lực.
-- [ ] ADMIN chuyển Admin → Support tương tự.
-- [ ] USER truy cập Admin bị từ chối.
-- [ ] ADMIN truy cập Booking bị từ chối.
-- [ ] JWT không hợp lệ bị từ chối tại Gateway và business services.
-- [ ] Tài khoản chưa provision không được cấp JWT.
-- [ ] Google identity không khớp `google_sub` bị từ chối.
-
-### 15.2. Booking & Inventory
-
-- [ ] Tìm phòng đúng theo tất cả các đêm lưu trú.
-- [ ] Không trả về phòng đã hết tồn.
-- [ ] Tạo booking cập nhật inventory atomically.
-- [ ] Concurrent booking không overselling.
-- [ ] Thanh toán mô phỏng chuyển sang `CONFIRMED`.
-- [ ] Hủy đơn hoàn inventory đúng một lần.
-- [ ] Job expiry hoàn inventory đúng một lần.
-- [ ] Inventory reconciliation không có sai lệch.
-
-### 15.3. Support Center
-
-- [ ] USER tạo ticket thành công.
-- [ ] USER chỉ xem ticket của mình.
-- [ ] ADMIN xem ticket trong tenant.
-- [ ] ADMIN phản hồi và xử lý ticket.
-- [ ] Ticket khác tenant không bị lộ.
-- [ ] Support Service tự xác thực JWT.
-
----
-
-## 16. Architecture Decisions
-
-| Decision | Selected Approach | Reason |
-|---|---|---|
-| IAM | Custom IAM Service | Tương thích với implementation developer |
-| Identity Provider | Google OAuth2/OIDC | Tái sử dụng flow hiện tại |
-| SSO | IAM HttpSession | Hỗ trợ phiên đăng nhập chung |
-| JWT | RS256 + JWKS | Xác thực phân tán giữa services |
-| Roles | USER, ADMIN | Đủ scope demo |
-| Frontend | 3 independent applications | Tách nghiệp vụ và kiểm thử SSO |
-| Database | Shared PostgreSQL | Đơn giản hóa transaction trong MVP |
-| Inventory | Per-night `room_inventory` | Quản lý số lượng phòng theo từng đêm |
-| Booking Consistency | Conditional UPDATE + transaction | Chống overselling |
-| Support | Separate frontend and service | Tách nghiệp vụ hỗ trợ |
-| Migration | Flyway per service | Quản lý schema và dependencies |
-
-Các quyết định chi tiết và thay đổi trong tương lai được ghi nhận tại `decisions.md`.
-
----
-
-## 17. Documentation References
-
-| Document | Purpose |
-|---|---|
-| `../README.md` | Tổng quan và hướng dẫn đọc tài liệu |
-| `iam-sso.md` | IAM authentication, JWT, JWKS, SSO |
-| `iam-integration-tasks.md` | Checklist mở rộng IAM lên 3 App |
-| `iam-testing.md` | IAM và SSO testing |
-| `api-contract.md` | REST API contracts và authorization |
-| `data-model.md` | ERD, DDL, inventory, database constraints |
-| `workflows.md` | Booking, payment, cancellation, expiry, Support |
-| `operations-and-tests.md` | Flyway, seed, concurrency và integration tests |
-| `decisions.md` | Architecture Decision Records |
-
----
-
-## 18. Architecture Status
-
-**Đã được developer mô tả trong tài liệu IAM:**
-
-- Google OAuth2/OIDC login.
-- PKCE S256.
-- IAM HttpSession SSO cho 2 App.
-- Custom JWT RS256.
-- JWKS.
-- Gateway/Catalog JWT verification.
-
-**Cần triển khai hoặc xác minh:**
-
-- SSO mở rộng lên 3 App.
-- IAM role-to-app enforcement.
-- Support Center và Support Service.
-- Booking Inventory ERD v2.
-- Booking lifecycle hoàn chỉnh.
-- Flyway migration đồng bộ.
-- Full integration và E2E tests.
-
-**Kết luận:** Đây là kiến trúc mục tiêu thống nhất cho StayHub 3-App, giữ nguyên hướng IAM của developer và mở rộng hệ thống theo phạm vi đã chốt. Chỉ đánh dấu các thành phần hoàn thành khi đã đối chiếu source code và có kết quả kiểm thử tương ứng.
+Các mục không ghi số đo ở trên được suy ra từ code.
