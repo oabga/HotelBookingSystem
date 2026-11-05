@@ -1,6 +1,6 @@
 # booking-service
 
-Service đặt, xem, thanh toán mô phỏng và huỷ booking, cổng `8082`, owner Phúc (C). Hợp đồng API nằm ở [api-contract.md §5](../docs/api-contract.md), thiết kế dữ liệu ở [erd-v2.md](../docs/erd-v2.md), sơ đồ ở [sequence-booking.md](../docs/sequence-booking.md), quy tắc nghiệp vụ ở [booking-policy.md](../docs/booking-policy.md).
+Service đặt, xem, thanh toán mô phỏng, huỷ và đổi ngày booking, cổng `8082`, owner Phúc (C). Hợp đồng API nằm ở [api-contract.md](../docs/documents/api-contract.md#4-booking), quy tắc dữ liệu ở [data-model.md](../docs/documents/data-model.md), schema ở [erd.md](../docs/documents/erd.md), sơ đồ ở [stayhub-sequence-diagrams.md](../docs/stayhub-sequence-diagrams.md).
 
 ## Chạy local
 
@@ -8,13 +8,13 @@ Service đặt, xem, thanh toán mô phỏng và huỷ booking, cổng `8082`, o
 
 Cách dưới đây chạy trực tiếp bằng Gradle, dùng khi cần debug. Cần JDK 21 và PostgreSQL với database chung `hotelbooking`. Phải chạy migration theo thứ tự IAM → Catalog → Booking, vì bảng `booking` có FK sang `tenant`, `app_user` và `room_type`. Nếu chạy Booking trước trên DB trống, migration sẽ báo lỗi thiếu bảng.
 
-Chạy từ thư mục `backend/` bằng Git Bash, mỗi service một terminal. IAM chưa phát JWT nên token lấy từ `test-api-catalog`, chạy riêng bằng `node server.mjs` trong thư mục đó. Dán khối biến môi trường vào mọi terminal chạy service:
+Chạy từ thư mục `backend/` bằng Git Bash, mỗi service một terminal. Để không cần đăng nhập Google, token lấy từ `test-api-catalog`, chạy riêng bằng `node server.mjs` trong thư mục đó. Dán khối biến môi trường vào mọi terminal chạy service:
 
 ```bash
 export JAVA_HOME=<đường dẫn JDK 21>
 # Trên Windows ở Việt Nam, JVM báo múi giờ Asia/Saigon và postgres:16 từ chối khi kết nối.
 export JAVA_TOOL_OPTIONS=-Duser.timezone=UTC
-# Bắt buộc để IAM khởi động; giá trị giả là đủ nếu không đăng nhập Google.
+# Bắt buộc để IAM khởi động. Giá trị giả là đủ nếu không đăng nhập Google.
 export GOOGLE_CLIENT_ID=dummy GOOGLE_CLIENT_SECRET=dummy
 export SECURITY_JWT_ISSUER=http://127.0.0.1:8090
 export SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI=http://127.0.0.1:8090/.well-known/jwks.json
@@ -57,13 +57,14 @@ Khi demo hết hạn, có thể rút ngắn mà không sửa file:
 | `BookingServiceTest` | Thứ tự trừ tồn, tính tiền, ngày theo giờ Việt Nam, chuyển trạng thái, cách đổi lỗi database thành lỗi nghiệp vụ | Không |
 | `BookingExpiryJobTest` | Job xử lý mọi đơn quá hạn, đơn lỗi không chặn đơn khác | Không |
 | `BookingApiTest` | Status và JSON của API, validate ngày và `roomCount`, thứ tự lỗi, phân quyền, các loại JWT lỗi | Không |
+| `BookingRescheduleIntegrationTest` | Đổi ngày trên PostgreSQL thật, gọi lại cùng `requestId` | Có, thiếu Docker thì fail |
 | `BookingFlowIntegrationTest` | Flyway, PostgreSQL thật, trừ và trả `room_inventory`, rollback, FK ghép, cách ly tenant và owner, hết hạn, request đồng thời. Sau mỗi test đều chạy truy vấn đối soát ERD §8 | Có |
 
 `BookingFlowIntegrationTest` bị **bỏ qua mà build vẫn xanh** nếu Docker không chạy, nên phải bật Docker khi lấy bằng chứng và kiểm tra report không có test bị skip. Test này tạo bảng từ đúng migration của `iam-service` và `catalog-service`.
 
-## Bàn giao cho Đạt (D)
+## API
 
-Gọi qua Gateway tại `http://localhost:8080/api/bookings`. Không commit JWT vào `docs/demo.http`.
+Gọi qua Gateway tại `http://localhost:8080/api/bookings`. Không commit JWT vào repository.
 
 | Request | Role | Thành công | Lỗi |
 | --- | --- | --- | --- |
@@ -72,6 +73,9 @@ Gọi qua Gateway tại `http://localhost:8080/api/bookings`. Không commit JWT 
 | `GET /api/bookings/{id}` | `USER`, `ADMIN` | `200` | `400`, `401`, `404` |
 | `POST /api/bookings/{id}/payment` | `USER` là chủ đơn | `200` | `400`, `401`, `403`, `404`, `409` |
 | `POST /api/bookings/{id}/cancel` | `USER` là chủ đơn | `200` | `400`, `401`, `403`, `404`, `409` |
+| `GET /api/bookings/reschedulable` | `USER` | `200` | `401`, `403` |
+| `GET /api/bookings/{id}/reschedule-quote` | `USER` là chủ đơn, `ADMIN` trong tenant | `200` | `400`, `401`, `404`, `409` |
+| `POST /api/bookings/{id}/reschedule` | `ADMIN` trong tenant | `200` | `400`, `401`, `403`, `404`, `409` |
 
 `USER` chỉ thấy booking của mình, `ADMIN` thấy mọi booking trong tenant của mình. Booking của tenant khác hoặc của người khác trả `404`. `payment` và `cancel` không có body.
 
@@ -181,11 +185,13 @@ UPDATE room_inventory SET sold = 0;
 COMMIT;
 ```
 
-## Giả định đang chờ IAM
+`CASCADE` xoá luôn `booking_reschedule` và toàn bộ phiếu `date_change_request`.
 
-Service đang yêu cầu claim `tenant_id` trong JWT là số nguyên JSON dương, ví dụ `"tenant_id": 1`, theo [api-contract.md §3.3](../docs/api-contract.md). `iam-service` cần phát đúng như vậy. Token có `tenant_id` dạng chuỗi sẽ bị trả `401`.
+## JWT
+
+Service yêu cầu claim `tenant_id` trong JWT là số nguyên JSON dương, ví dụ `"tenant_id": 1`. `iam-service` phát đúng như vậy. Token có `tenant_id` dạng chuỗi sẽ bị trả `401`.
 
 ## Giới hạn hiện tại
 
 - JWT đang được kiểm tra bằng `SecurityConfig` trong service này, vì `common-security` chưa có code. Có thể thay khi module đó hoàn thành.
-- Xem thêm các giới hạn nghiệp vụ ở [booking-policy.md](../docs/booking-policy.md).
+- Xem thêm các giới hạn ở [architecture.md](../docs/documents/architecture.md#12-giới-hạn-đã-biết).

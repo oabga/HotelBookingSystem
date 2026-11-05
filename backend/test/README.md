@@ -10,10 +10,10 @@ Scripts here build and run the backend locally, then check migrations, database 
 
 ## Start and build
 
-From any working directory:
+From the repository root:
 
 ```bash
-bash /Volumes/DATA/JIKAY/src/project-demo/HotelBookingSystem/backend/test/00-up.sh
+bash backend/test/00-up.sh
 ```
 
 The first run builds each Spring Boot service and may take several minutes. The profile starts PostgreSQL, IAM, Catalog, Booking, Support, Notification, API Gateway, the temporary token server, and Adminer. Test identities and repeatable ERD fixtures are inserted after migrations complete.
@@ -21,8 +21,8 @@ The first run builds each Spring Boot service and may take several minutes. The 
 ## Check DB and run API workflows
 
 ```bash
-bash /Volumes/DATA/JIKAY/src/project-demo/HotelBookingSystem/backend/test/10-check-db.sh
-bash /Volumes/DATA/JIKAY/src/project-demo/HotelBookingSystem/backend/test/20-api-workflow.sh
+bash backend/test/10-check-db.sh
+bash backend/test/20-api-workflow.sh
 ```
 
 The API workflow checks:
@@ -47,7 +47,7 @@ The temporary token issuer is only for local API testing. IAM starts for migrati
 ## Stop and retain data
 
 ```bash
-cd /Volumes/DATA/JIKAY/src/project-demo/HotelBookingSystem/backend
+cd backend
 docker compose --profile workflow down
 ```
 

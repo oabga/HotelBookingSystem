@@ -1,6 +1,6 @@
 # StayHub: sequence diagram toàn hệ thống
 
-Vẽ theo source code trong `HotelBookingSystem` ngày 05/11/2026. Tài liệu trong `docs/` là kiến trúc mục tiêu nên chỉ dùng để đối chiếu. Hệ thống chưa được chạy khi vẽ, nên sơ đồ thể hiện điều code quy định, chưa phải kết quả E2E.
+Vẽ theo source code của `main`, commit `1737b60`, đối chiếu ngày 05/11/2026. Các luồng đặt phòng, thanh toán, đổi ngày và thông báo đã chạy qua workflow Docker với JWT của `dev-token`. Đăng nhập bằng tài khoản Google thật chưa chạy, nên phần có Google là điều code quy định, chưa phải kết quả E2E. Chi tiết ở [documents/README.md](documents/README.md#6-mức-độ-kiểm-chứng).
 
 Quy ước: nét liền là request, nét đứt là response. Số thứ tự đánh riêng trong từng sơ đồ. Nhãn "gọi thẳng" là lời gọi từ Support sang Booking không qua Gateway.
 
@@ -22,10 +22,10 @@ sequenceDiagram
     participant N as Notification<br/>:8083
     participant D as PostgreSQL<br/>hotelbooking
     Note over U,D: A · Đăng nhập lần đầu
-    U->>I: GET /auth/start?app=app1
+    U->>I: GET /auth/start?app=app1&mode=login
     I->>G: Chuyển hướng qua trình duyệt:<br/>Authorization Code + PKCE S256
     G-->>I: code + state, đổi lấy ID token
-    I->>D: SELECT app_user theo email, gắn hoặc đối chiếu google_sub
+    I->>D: SELECT app_user theo email, App 1 tạo USER nếu chưa có, gắn hoặc đối chiếu google_sub
     I->>I: Ký JWT RS256, hạn 15 phút
     I-->>U: 302 /callback/#token=JWT
     Note over U,D: B · Tìm và đặt phòng
@@ -44,7 +44,7 @@ sequenceDiagram
     B-->>U: 200 CONFIRMED
     B->>D: Job mỗi 60 giây: đơn quá hạn<br/>thành EXPIRED, trả sold
     Note over U,D: D · USER sang Support Center và gửi phiếu đổi ngày
-    U->>I: GET /auth/start?app=app3 + cookie phiên
+    U->>I: GET /auth/start?app=app3&mode=login + cookie phiên
     I->>D: SELECT app_user, đối chiếu lại google_sub
     I-->>U: 302 /callback/#token=JWT mới, không qua Google
     U->>W: POST /api/support/date-change-requests
@@ -74,38 +74,43 @@ Bước A rút gọn chặng chuyển hướng qua trình duyệt. Response th�
 
 ## Đăng nhập Google và SSO
 
-Mỗi app nhận JWT riêng, còn phiên đăng nhập nằm ở cookie của IAM. Vì vậy khi đã có phiên, app thứ hai lấy được JWT mà không phải qua Google. Tải lại trang sẽ mất JWT và phải bấm đăng nhập lại.
+Mỗi app nhận JWT riêng, còn phiên đăng nhập nằm ở cookie của IAM. Khi đã có phiên, app được phép có thể lấy JWT mà không qua Google. Mọi lần từ chối đều trả về trang callback của app kèm mã lỗi. Tải lại trang sẽ mất JWT và phải bấm đăng nhập lại.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant U as Người dùng<br/>USER hoặc ADMIN
-    participant F as Trình duyệt<br/>App 1, App 2, Support
+    participant F as Trình duyệt<br/>App 1, App Admin, Support
     participant I as IAM<br/>:8084
     participant G as Google<br/>OIDC
     participant D as PostgreSQL<br/>hotelbooking
-    U->>F: Bấm Login with Google
-    F->>I: GET /auth/start?app=app1 | app2 | app3
-    alt app không có trong allowlist
+    U->>F: Bấm Tiếp tục với Google
+    F->>I: GET /auth/start?app=app1 | app2 | app3 &mode=login
+    alt app ngoài allowlist, hoặc mode=register ở app khác app1
         I-->>F: 400, không chuyển sang Google
-    else app hợp lệ: lưu sso_app vào HttpSession
+    else hợp lệ: lưu sso_app và sso_register vào HttpSession
         alt chưa có phiên IAM
             I-->>F: 302 /oauth2/authorization/google
-            F->>G: Authorization request: state, code_challenge, S256
-            U->>G: Đăng nhập Google
+            F->>G: Authorization request: state, code_challenge, S256, prompt=select_account
+            U->>G: Chọn tài khoản, đăng nhập Google
             G-->>F: 302 /login/oauth2/code/google?code&state
             F->>I: Gửi code + state, IAM kiểm tra state
-            I->>G: Đổi code bằng code_verifier + client secret
-            G-->>I: ID token
+            alt người dùng hủy, state hoặc code sai
+                I-->>F: Hủy phiên, 302 {callback}/#error=login_failed
+            else hợp lệ
+                I->>G: Đổi code bằng code_verifier + client secret
+                G-->>I: ID token
+            end
         else đã có phiên IAM: dùng lại OidcUser, không gặp Google
         end
         I->>D: SELECT app_user theo email
-        D-->>I: id, tenant_id, role, google_sub
-        I->>I: Kiểm tra email_verified, user đã được cấp sẵn,<br/>google_sub (chưa có thì gắn, khác thì từ chối)
+        D-->>I: id, tenant_id, role, google_sub, hoặc không có dòng
+        I->>I: Xét email_verified, chính sách của app (bảng dưới),<br/>rồi google_sub (chưa có thì gắn, khác thì từ chối)
         alt không đạt một trong các điều kiện trên
-            I->>I: Xóa SecurityContext, hủy phiên
-            I-->>F: 403 không có body, không có JWT
+            I->>I: Rollback, xóa SecurityContext, hủy phiên
+            I-->>F: 302 {callback}/#error=not_provisioned
         else đạt
+            I->>D: Nếu cần: INSERT hoặc UPDATE app_user, COMMIT
             I->>I: Ký JWT RS256: iss, sub, email, tenant_id, role, iat, exp (15 phút)
             I-->>F: 302 {callback}/#token=JWT
             F->>F: Đọc token, xóa fragment khỏi URL, giữ trong bộ nhớ trang
@@ -114,7 +119,37 @@ sequenceDiagram
     end
 ```
 
-Nhánh “đạt” chỉ xét danh tính, chưa xét role với app: USER vẫn nhận JWT khi đăng nhập App 2, xem mục khác biệt.
+Mở một app không được phép cũng hủy luôn phiên IAM, nên các app khác phải qua Google lại khi cần JWT mới.
+
+### IAM xét gì ở từng app
+
+Cả ba app đều yêu cầu `email_verified` và `google_sub` khớp. Tham số `mode` không đổi kết quả: App 1 tạo tài khoản mới kể cả với `mode=login`, còn `mode=register` ở app khác nhận 400.
+
+| App | Khi email chưa có tài khoản | Điều kiện nhận JWT | Role trong JWT |
+|---|---|---|---|
+| App 1 (`app1`, `:3000`) | Tạo tài khoản USER trong tenant mặc định (Tenant 1) | Email khác `IAM_ADMIN_EMAIL` và role đang là USER | USER |
+| App Admin (`app2`, `:3001`) | Tạo tài khoản ADMIN trong tenant mặc định, chỉ với `IAM_ADMIN_EMAIL` | Email đúng bằng `IAM_ADMIN_EMAIL`. Tài khoản đang là USER được nâng thành ADMIN và giữ nguyên tenant | ADMIN |
+| Support (`app3`, `:3002`) | Từ chối | Tài khoản đã tồn tại | USER hoặc ADMIN đang lưu |
+
+### Đăng xuất
+
+Chỉ App 1 có nút Đăng xuất. Lệnh này hủy phiên IAM, không hủy phiên Google và không thu hồi JWT đã cấp. Tab App Admin hoặc Support đang mở vẫn dùng được JWT của nó đến khi hết hạn.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as Người dùng<br/>USER
+    participant F as Trình duyệt<br/>App 1
+    participant I as IAM<br/>:8084
+    U->>F: Bấm Đăng xuất
+    F->>I: GET /auth/logout?app=app1
+    alt app ngoài allowlist
+        I-->>F: 400
+    else hợp lệ: hủy phiên IAM
+        I-->>F: 302 {callback}/#logged_out
+        F->>F: Trang tải lại, JWT cũ mất khỏi bộ nhớ
+    end
+```
 
 ## Kiểm tra JWT trên mỗi request
 
@@ -123,7 +158,7 @@ Gateway chỉ xác nhận token hợp lệ, còn role và tenant do service tự
 ```mermaid
 sequenceDiagram
     autonumber
-    participant F as Trình duyệt<br/>App 1, App 2, Support
+    participant F as Trình duyệt<br/>App 1, App Admin, Support
     participant W as Gateway<br/>:8080
     participant T as Service nghiệp vụ<br/>Catalog, Booking, Support, Notification
     participant I as IAM<br/>:8084
@@ -135,7 +170,7 @@ sequenceDiagram
     end
     W->>W: Kiểm tra chữ ký RS256, iss, exp và claim bắt buộc.<br/>Không xét role.
     alt JWT sai hoặc hết hạn
-        W-->>F: 401, frontend báo đăng nhập lại
+        W-->>F: 401, frontend xóa JWT, báo đăng nhập lại
     else JWT hợp lệ
         W->>T: Bỏ tiền tố /api, chuyển tiếp nguyên header Authorization
         opt service chưa có public key trong cache
@@ -156,7 +191,7 @@ sequenceDiagram
     end
 ```
 
-IAM chỉ được gọi để lấy public key khi chưa có trong cache, không tham gia từng request nghiệp vụ.
+IAM chỉ được gọi để lấy public key khi gặp `kid` chưa có trong cache, không tham gia từng request nghiệp vụ.
 
 ## Đặt phòng
 
@@ -165,7 +200,7 @@ Kết quả tìm phòng không giữ chỗ. Khi đặt, Booking kiểm tra lại
 ```mermaid
 sequenceDiagram
     autonumber
-    participant F as Trình duyệt<br/>App 1, App 2, Support
+    participant F as Trình duyệt<br/>App 1, App Admin, Support
     participant B as Booking<br/>:8082
     participant D as PostgreSQL<br/>hotelbooking
     F->>B: POST /api/bookings qua Gateway<br/>roomTypeId, checkIn, checkOut, roomCount
@@ -194,7 +229,7 @@ Cả ba luồng đều đổi trạng thái bằng `UPDATE ... WHERE status = 'P
 ```mermaid
 sequenceDiagram
     autonumber
-    participant F as Trình duyệt<br/>App 1, App 2, Support
+    participant F as Trình duyệt<br/>App 1, App Admin, Support
     participant B as Booking<br/>:8082
     participant J as BookingExpiryJob<br/>trong Booking :8082
     participant D as PostgreSQL<br/>hotelbooking
@@ -232,7 +267,7 @@ Số thứ tự chạy liên tục qua ba luồng để tiện tham chiếu, ba 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant F as Trình duyệt<br/>App 1, App 2, Support
+    participant F as Trình duyệt<br/>App 1, App Admin, Support
     participant W as Gateway<br/>:8080
     participant C as Catalog<br/>:8081
     participant D as PostgreSQL<br/>hotelbooking
@@ -259,7 +294,7 @@ Loại phòng mới chỉ có tồn kho đến 2027-01-31, nên đặt phòng sa
 ```mermaid
 sequenceDiagram
     autonumber
-    participant F as Trình duyệt<br/>App 1, App 2, Support
+    participant F as Trình duyệt<br/>App 1, App Admin, Support
     participant S as Support<br/>:8085
     participant B as Booking<br/>:8082
     participant D as PostgreSQL<br/>hotelbooking
@@ -293,7 +328,7 @@ Booking commit trước, phiếu ghi nhận sau. Nếu Support lỗi giữa hai 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant F as Trình duyệt<br/>App 1, App 2, Support
+    participant F as Trình duyệt<br/>App 1, App Admin, Support
     participant S as Support<br/>:8085
     participant B as Booking<br/>:8082
     participant D as PostgreSQL<br/>hotelbooking
@@ -340,7 +375,7 @@ Phiếu đã duyệt thì sự kiện đã nằm trong database, nên Notificati
 ```mermaid
 sequenceDiagram
     autonumber
-    participant F as Trình duyệt<br/>App 1, App 2, Support
+    participant F as Trình duyệt<br/>App 1, App Admin, Support
     participant S as Support<br/>:8085
     participant N as Notification<br/>:8083
     participant D as PostgreSQL<br/>hotelbooking
@@ -362,54 +397,10 @@ sequenceDiagram
 
 Thời gian từ lúc duyệt đến lúc USER thấy thông báo tối đa khoảng 17 giây: 2 giây của job cộng 15 giây của frontend. Con số này tính từ cấu hình, chưa đo.
 
-## Khác biệt giữa code và tài liệu
+## Giới hạn và việc còn lại
 
-Sơ đồ vẽ theo code, nên những chỗ dưới đây sẽ không khớp với `docs/documents/architecture.md` và `iam-sso.md`.
+Danh sách đầy đủ ở [documents/architecture.md](documents/architecture.md#12-giới-hạn-đã-biết) và [documents/iam-integration-tasks.md](documents/iam-integration-tasks.md). Ba điểm ảnh hưởng trực tiếp tới các sơ đồ trên:
 
-### IAM chưa chặn role theo app
-
-USER đăng nhập App 2, hay ADMIN đăng nhập App 1, vẫn nhận JWT. API vẫn được chặn theo từng endpoint ở service. Tài liệu đã ghi đây là việc chưa làm.
-
-Nguồn: `iam-service/.../security/SsoLoginService.java: completeLogin`
-
-### Docker Compose mặc định không tin JWT của IAM
-
-Gateway và các service mặc định dùng issuer và JWKS của `dev-token`. Đăng nhập Google thật sẽ cho JWT có issuer `http://localhost:8084` và bị 401, trừ khi đặt lại hai biến môi trường.
-
-Nguồn: `backend/docker-compose.yml: x-dev-jwt-env`
-
-### Lỗi đăng nhập không về tới frontend
-
-Frontend có nhánh xử lý `#error=not_provisioned` và `#error=login_failed`, nhưng IAM không bao giờ gửi chúng. Tài khoản chưa được cấp sẽ dừng ở trang 403 trống trên cổng 8084.
-
-Nguồn: `frontend/auth.js: parseFragment · iam-service/.../SsoAuthenticationSuccessHandler.java: deny`
-
-### Khởi động lại IAM có thể làm JWT mới bị từ chối
-
-Mỗi lần khởi động, IAM sinh RSA key mới nhưng giữ nguyên `kid = stayhub-key-1`. Nơi đang cache key cũ có thể không biết cần tải lại và trả 401 cho JWT mới. Điểm này suy ra từ code, cần chạy thử để xác nhận.
-
-Nguồn: `iam-service/.../jwt/JwtKeyProvider.java`
-
-### Support chỉ xử lý phiếu đổi ngày
-
-Tài liệu mô tả ticket và tin nhắn chung, còn code đã gỡ phần đó. Tài liệu kiến trúc cũng chưa có `notification-service` và bảng outbox. README của Support đã ghi nhận điểm lệch này.
-
-Nguồn: `backend/support-service/README.md`
-
-### Support dùng mã app3
-
-Tài liệu ghi `app=support`, còn cấu hình IAM và frontend dùng `app3`. Gọi `app=support` sẽ nhận 400.
-
-Nguồn: `iam-service/src/main/resources/application.yml: sso.callbacks`
-
-### Gateway không phân quyền theo route
-
-Tài liệu có lớp “Route Authorization” ở Gateway, nhưng code chỉ yêu cầu JWT hợp lệ. Role được xét hoàn toàn ở service.
-
-Nguồn: `api-gateway/.../security/SecurityConfig.java`
-
-### Cổng Notification khác nhau khi chạy Docker
-
-Chạy local dùng 8083. Trong Compose, cổng host là 8086 vì Adminer đã chiếm 8083, trong khi bảng ở `backend/README.md` ghi cả hai ở 8083. Đi qua Gateway thì không bị ảnh hưởng.
-
-Nguồn: `backend/docker-compose.yml`
+- **Khởi động lại IAM:** IAM sinh RSA key mới nhưng giữ nguyên `kid`. Đo bằng bản sao `dev-token` cố định `kid`: JWT mới bị từ chối ở mọi nơi, Catalog, Booking, Support hồi phục sau khoảng 5 phút, Gateway chỉ hết `401` khi được restart.
+- **JWT trong Docker Compose:** Gateway và các service mặc định tin `dev-token`. Đăng nhập Google thật cần đặt `SECURITY_JWT_ISSUER` và `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI` trong `.env.local`.
+- **Cổng Notification:** chạy local dùng `8083`, Compose dùng cổng host `8086`. Đi qua Gateway thì không bị ảnh hưởng.

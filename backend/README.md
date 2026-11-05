@@ -1,26 +1,15 @@
-# StayHub — Documentation index
+# StayHub backend
 
-**Status:** Proposed target architecture (2026-11-04). Not a statement of deployed functionality. Requires code/migration verification and team approval (G2).
+Backend gồm IAM, API Gateway, Catalog, Booking, Support và Notification, dùng chung PostgreSQL `hotelbooking`.
 
-## Source of truth
-1. `docs/architecture.md` — system boundary, 3 apps, Keycloak SSO, authorization.
-2. `docs/api-contract.md` — proposed routes, payloads, HTTP semantics.
-3. `docs/data-model.md` — logical schema, booking inventory invariants, support tickets.
-4. `docs/workflows.md` — USER/ADMIN lifecycles, SSO, booking, support.
-5. `docs/decisions.md` — architecture decisions, open questions.
-6. `docs/operations-and-tests.md` — migration, local setup, acceptance, known limitations.
-
-## Superseded documents
-`plan-v2.md`, `booking-policy.md`, `catalog-known-limitations.md`, `erd-v2.md`, `migration-convention.md`, `sequence-booking.md`, `sequence-catalog.md`, and the original `api-contract.md` / `decisions.md` are archived under `archive/original/` for traceability. Do not keep duplicate copies in active `docs/`.
-
-**Important:** No repository implementation was supplied. This is a proposed documentation baseline, not verified runtime behavior.
+Tài liệu nằm ở [docs/README.md](docs/README.md). Bắt đầu từ [docs/documents/README.md](docs/documents/README.md).
 
 ## Chạy thử bằng Docker
 
-Chỉ cần Docker có Compose v2, không cần cài JDK hay Node. Từ mọi thư mục, chạy:
+Cần Docker có Compose v2, `curl`, `python3` và Bash, không cần cài JDK hay Node. Từ thư mục gốc repository, chạy:
 
 ```bash
-bash /Volumes/DATA/JIKAY/src/project-demo/HotelBookingSystem/backend/test/run-all.sh
+bash backend/test/run-all.sh
 ```
 
 Lần đầu phải tải image, Gradle và dependency nên có thể mất hơn 10 phút; các lần sau nhanh hơn nhờ cache. Script build và đợi các service khỏe, tạo tài khoản test, sinh mock fixtures, kiểm tra Flyway và tính nhất quán DB, rồi gọi workflow API qua Gateway. Nó không xóa Docker volume hiện tại.
@@ -29,10 +18,11 @@ Lần đầu phải tải image, Gradle và dependency nên có thể mất hơn
 | --- | --- | --- |
 | `booking-service` | `http://localhost:8082` | API đặt, thanh toán, huỷ booking |
 | `support-service` | `http://localhost:8085` | Phiếu xin đổi ngày, xem [support-service/README.md](support-service/README.md) |
-| `notification-service` | `http://localhost:8083` | Thông báo trong ứng dụng, xem [notification-service/README.md](notification-service/README.md) |
+| `notification-service` | `http://localhost:8086` | Thông báo trong ứng dụng, xem [notification-service/README.md](notification-service/README.md) |
 | `catalog-service` | `http://localhost:8081` | API khách sạn, loại phòng, tồn kho |
 | `dev-token` | `http://127.0.0.1:8090` | Ký JWT tạm cho local API tests; không phải Google SSO |
-| `iam-service` | `http://127.0.0.1:8084` | IAM, JWKS và migration; Google login cần OAuth credentials thật |
+| `iam-service` | `http://localhost:8084` | Google login, JWT, JWKS. Google login cần OAuth credentials thật |
+| `api-gateway` | `http://localhost:8080` | Cổng vào của mọi API |
 | `postgres` | `localhost:5432` | Database chung `hotelbooking` |
 | `adminer` | `http://127.0.0.1:8083` | Xem database qua trình duyệt |
 
@@ -135,7 +125,7 @@ GROUP BY i.tenant_id, i.room_type_id, i.stay_date, i.sold
 HAVING i.sold <> COALESCE(SUM(b.room_count), 0);"
 ```
 
-Các ngày mẫu nằm trong khoảng mở bán đến `2027-01-31`. Khi một ngày đã qua, request với ngày đó trả `400`, hãy đổi sang ngày sau hôm nay.
+Các ngày mẫu cần nằm trong khoảng mở bán đến `2027-01-31`. Khi một ngày đã qua, request với ngày đó trả `400`, hãy đổi sang ngày sau hôm nay.
 
 API Catalog thử được trên giao diện tại <http://127.0.0.1:8090>. Trang này không gọi Booking.
 
@@ -145,13 +135,15 @@ API Catalog thử được trên giao diện tại <http://127.0.0.1:8090>. Tran
 # Reset booking để test lại từ đầu
 sql "TRUNCATE booking RESTART IDENTITY CASCADE; UPDATE room_inventory SET sold = 0;"
 
-# Rút ngắn thời gian giữ phòng khi test hết hạn
-BOOKING_PAYMENT_HOLD=PT1M BOOKING_EXPIRY_INTERVAL=PT5S docker compose --profile workflow up -d --wait booking-service
+# Rút ngắn thời gian giữ phòng khi test hết hạn: chạy Booking bằng Gradle.
+# Compose không truyền các biến này vào booking-service.
+./gradlew :booking-service:bootRun --args="--booking.payment.hold=PT1M --booking.expiry.interval=PT5S"
 
 # Xem log
 docker compose --profile workflow logs -f booking-service
 
-# Dựng lại sau khi pull hoặc sửa code
+# Dựng lại sau khi pull hoặc sửa code. Nếu IAM khởi động lại, restart cả api-gateway
+# (xem docs/documents/iam-sso.md, mục Quản lý key)
 docker compose --profile workflow up --build -d --wait
 
 # Dừng, giữ dữ liệu
@@ -163,7 +155,7 @@ docker compose --profile workflow down -v
 
 ## Test tự động
 
-Cần JDK 21 và Docker đang chạy. Xem chi tiết ở [booking-service/README.md](booking-service/README.md).
+Cần JDK 21 và Docker đang chạy. Danh sách test của mọi service ở [docs/documents/operations-and-tests.md](docs/documents/operations-and-tests.md#7-test).
 
 ```bash
 ./gradlew :booking-service:test
