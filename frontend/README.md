@@ -14,7 +14,8 @@ Mở `http://localhost:3000/` (App 1), `http://localhost:3001/` (App 2) và `htt
 
 ## Hành vi hiện có
 
-- **Đăng nhập:** nút login chuyển toàn trang tới `http://localhost:8084/auth/start?app=app1` hoặc `app2`. Trang callback đọc `#token=<jwt>`, xoá fragment ngay, giữ token trong bộ nhớ của trang. Tải lại trang sẽ mất token; không dùng localStorage, sessionStorage hay JWT hard-code.
+- **Đăng nhập/logout:** App 1 có nút **Tiếp tục với Google**, tự tạo tài khoản role `USER` trong Tenant 1 cho email mới. App Admin chỉ cho email `IAM_ADMIN_EMAIL` nhận role `ADMIN`. App Support xác định giao diện và nghiệp vụ theo role trong IAM. Các nút dùng form HTML để vẫn hoạt động nếu `auth.js` không tải. Logout kết thúc phiên IAM, bỏ JWT trong bộ nhớ và lần đăng nhập tiếp theo yêu cầu chọn tài khoản Google. Trang callback đọc `#token=<jwt>`, xoá fragment ngay, giữ token trong bộ nhớ của trang. Tải lại trang sẽ mất token; không dùng localStorage, sessionStorage hay JWT hard-code.
+- **Trạng thái App 1:** trước khi đăng nhập chỉ hiện lời mời Google; sau callback hợp lệ, lời mời được ẩn, email/role/tenant và nút đăng xuất hiện ra, rồi mới mở phần tìm phòng và booking. Reload trang sẽ mất JWT trong memory và yêu cầu đăng nhập lại.
 - **Tìm phòng (USER, ADMIN):** chọn khách sạn từ `GET /api/hotels`, chọn ngày, bấm **Tìm kiếm** mới gọi `GET /api/hotels/{id}/availability`. Đổi điều kiện hoặc đặt phòng xong sẽ xoá kết quả cũ; frontend không tự tìm lại.
 - **Đặt phòng (USER):** gửi `POST /api/bookings` với `roomTypeId`, `checkIn`, `checkOut`, `roomCount`. Mọi nút Đặt bị khoá tới khi có response và không tự gửi lại, vì gửi lại sẽ tạo đơn thứ hai.
 - **Booking:** USER xem đơn của mình, thanh toán mô phỏng và huỷ đơn `PENDING_PAYMENT`. ADMIN xem mọi đơn trong tenant nhưng không có nút thao tác.

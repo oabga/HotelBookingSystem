@@ -10,6 +10,9 @@ import org.springframework.security.oauth2.client.web.DefaultOAuth2Authorization
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestCustomizers;
 import org.springframework.security.web.SecurityFilterChain;
 
+import java.util.HashMap;
+import java.util.Map;
+
 @Configuration
 public class SecurityConfig {
 
@@ -24,7 +27,7 @@ public class SecurityConfig {
             throws Exception {
         http.csrf(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/auth/start", "/.well-known/jwks.json")
+                        .requestMatchers("/auth/start", "/auth/logout", "/.well-known/jwks.json")
                         .permitAll()
                         .anyRequest().authenticated())
                 .oauth2Login(oauth2 -> oauth2
@@ -45,7 +48,13 @@ public class SecurityConfig {
         DefaultOAuth2AuthorizationRequestResolver resolver =
                 new DefaultOAuth2AuthorizationRequestResolver(
                         clientRegistrationRepository, AUTHORIZATION_REQUEST_BASE_URI);
-        resolver.setAuthorizationRequestCustomizer(OAuth2AuthorizationRequestCustomizers.withPkce());
+        resolver.setAuthorizationRequestCustomizer(authorizationRequest -> {
+            OAuth2AuthorizationRequestCustomizers.withPkce().accept(authorizationRequest);
+            Map<String, Object> parameters = new HashMap<>(
+                    authorizationRequest.build().getAdditionalParameters());
+            parameters.put("prompt", "select_account");
+            authorizationRequest.additionalParameters(parameters);
+        });
         return resolver;
     }
 }

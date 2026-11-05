@@ -4,8 +4,11 @@ const { parseFragment, decodeClaims, initAuth } = require("./auth.js");
 
 function fakePage(appId, hash = "", pathname = "/callback/") {
   const elements = new Map();
-  for (const id of ["login-button", "login-status", "integration-status", "user-email", "user-role", "user-tenant"]) {
-    elements.set(id, { textContent: "", disabled: true, addEventListener(_event, callback) { this.click = callback; } });
+  for (const id of [
+    "login-button", "login-status", "integration-status", "user-email", "user-role", "user-tenant",
+    "login-description", "login-actions", "logout-form", "app-content"
+  ]) {
+    elements.set(id, { textContent: "", disabled: true, hidden: false, addEventListener(_event, callback) { this.click = callback; } });
   }
   const location = { hash, pathname, search: "", assigned: null, assign(url) { this.assigned = url; } };
   const history = { state: null, replaced: null, replaceState(_state, _title, url) { this.replaced = url; location.hash = ""; } };
@@ -25,7 +28,7 @@ test("Login button navigates to the correct IAM URL for each app", () => {
     const auth = initAuth(page.win, page.doc);
     assert.equal(page.elements.get("login-button").disabled, false);
     page.elements.get("login-button").click();
-    assert.equal(page.win.location.assigned, "http://localhost:8084/auth/start?app=" + appId);
+  assert.equal(page.win.location.assigned, "http://localhost:8084/auth/start?app=" + appId + "&mode=login");
     assert.deepEqual(auth.bearerHeaders(), {});
     assert.equal(auth.getDisplayRole(), null);
     assert.equal(auth.getDisplayTenantId(), null);
@@ -41,10 +44,29 @@ test("Token fragment is removed and decoded claims are display only", () => {
   assert.equal(page.elements.get("user-email").textContent, "sample@example.test");
   assert.equal(page.elements.get("user-role").textContent, "USER");
   assert.equal(page.elements.get("user-tenant").textContent, "1");
-  assert.match(page.elements.get("login-status").textContent, /chưa xác minh chữ ký/);
+  assert.match(page.elements.get("login-status").textContent, /đã đăng nhập với sample@example.test/);
+  assert.equal(page.elements.get("login-actions").hidden, true);
+  assert.equal(page.elements.get("logout-form").hidden, false);
+  assert.equal(page.elements.get("app-content").hidden, false);
   assert.deepEqual(auth.bearerHeaders(), { Authorization: "Bearer " + token });
   assert.equal(auth.getDisplayRole(), "USER");
   assert.equal(auth.getDisplayTenantId(), 1);
+});
+
+test("API 401 expires the visible session and restores the Google sign-in prompt", () => {
+  const token = sampleToken();
+  const page = fakePage("app1", "#token=" + token);
+  const auth = initAuth(page.win, page.doc);
+
+  auth.expireSession("API không chấp nhận phiên (401).");
+
+  assert.deepEqual(auth.bearerHeaders(), {});
+  assert.equal(auth.getDisplayRole(), null);
+  assert.equal(page.elements.get("app-content").hidden, true);
+  assert.equal(page.elements.get("login-actions").hidden, false);
+  assert.equal(page.elements.get("logout-form").hidden, true);
+  assert.equal(page.elements.get("user-email").textContent, "Chưa đăng nhập");
+  assert.equal(page.elements.get("login-status").textContent, "API không chấp nhận phiên (401).");
 });
 
 test("ADMIN display role comes from the token on either app", () => {
@@ -78,7 +100,7 @@ test("Unknown role is rejected before retaining JWT", () => {
 });
 
 test("Known error fragments are removed and never create a bearer header", () => {
-  for (const [error, message] of [["not_provisioned", /chưa được IAM cấp quyền/], ["login_failed", /thất bại/]]) {
+  for (const [error, message] of [["not_provisioned", /không được cấp quyền ADMIN/], ["login_failed", /thất bại/]]) {
     const page = fakePage("app2", "#error=" + error);
     const auth = initAuth(page.win, page.doc);
     assert.equal(page.win.history.replaced, "/callback/");

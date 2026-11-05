@@ -32,7 +32,11 @@
       fetchFn,
       auth,
       onUnauthorized() {
-        doc.getElementById("login-status").textContent = api.sessionExpired;
+        if (typeof auth.expireSession === "function") auth.expireSession(api.sessionExpired);
+        else doc.getElementById("login-status").textContent = api.sessionExpired;
+        doc.getElementById("create-panel").hidden = true;
+        doc.getElementById("notification-panel").hidden = true;
+        doc.getElementById("filter-wrap").hidden = true;
         if (pollTimer !== null) {
           timers.clearInterval(pollTimer);
           pollTimer = null;

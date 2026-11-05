@@ -160,13 +160,16 @@ IAM Service
     |       |
     |       v
     |   IAM xác thực Google Identity
+    |   App 1: tự tạo app_user USER cho Google email mới;
+    |   App Admin: chỉ IAM_ADMIN_EMAIL, role ADMIN;
+    |   Support: dùng role app_user hiện có
     |
     +-- Đã có IAM Session
             |
             v
     Kiểm tra app_user
     - email_verified
-    - pre-provisioned account
+    - tài khoản tồn tại hoặc được tạo từ luồng đăng ký App 1
     - google_sub binding
     - tenant
     - role
@@ -579,7 +582,7 @@ Không đưa Google Client Secret, JWT, private key, session cookie hoặc crede
 
 | Metric | Target |
 |---|---|
-| Google Login | Thành công với tài khoản hợp lệ được provision |
+| Google Login | Thành công với tài khoản đã đăng ký/provision và email được Google xác minh |
 | SSO Booking → Support | Không yêu cầu nhập lại thông tin Google khi IAM session còn hiệu lực |
 | SSO Admin → Support | Không yêu cầu nhập lại thông tin Google khi IAM session còn hiệu lực |
 | USER truy cập Admin | Bị từ chối |

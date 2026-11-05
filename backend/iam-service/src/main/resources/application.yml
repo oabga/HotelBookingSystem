@@ -42,6 +42,9 @@ security:
 # Allowlist app -> callback frontend. "app" ngoài danh sách này bị chặn ở /auth/start (400),
 # không redirect tuỳ ý (docs/api-contract.md §3.1).
 sso:
+  registration:
+    default-tenant-id: ${IAM_REGISTRATION_DEFAULT_TENANT_ID:1}
+    admin-email: ${IAM_ADMIN_EMAIL:}
   callbacks:
     app1: http://localhost:3000/callback/
     app2: http://localhost:3001/callback/

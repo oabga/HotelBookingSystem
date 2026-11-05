@@ -29,8 +29,11 @@
         </div>
         <div class="login-card">
           <h2>Phiên đăng nhập</h2>
-          <p>Đăng nhập qua IAM của StayHub. JWT chỉ được giữ trong bộ nhớ của trang.</p>
-          <button id="login-button" type="button" disabled>Login with Google</button>
+          <p>Chỉ email admin được cấp quyền mới vào được ứng dụng này. JWT chỉ được giữ trong bộ nhớ của trang.</p>
+          <form action="http://localhost:8084/auth/start" method="get">
+            <input type="hidden" name="app" value="app2">
+            <button id="login-button" type="submit">Tiếp tục với Google</button>
+          </form>
           <p id="login-status" role="status">Chưa đăng nhập.</p>
         </div>
       </section>

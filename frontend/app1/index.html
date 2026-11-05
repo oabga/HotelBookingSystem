@@ -25,24 +25,35 @@
         <div>
           <span class="eyebrow">Frontend demo · App 1</span>
           <h1 id="page-title">Tìm phòng theo khách sạn và ngày ở.</h1>
-          <p>Đăng nhập bằng Google, chọn khách sạn trong tenant của bạn, tìm phòng còn trống rồi đặt và thanh toán mô phỏng.</p>
+          <p>Tìm phòng còn trống, đặt kỳ nghỉ và quản lý các booking của bạn trong một nơi.</p>
         </div>
         <div class="login-card">
-          <h2>Phiên đăng nhập</h2>
-          <p>Đăng nhập qua IAM của StayHub. JWT chỉ được giữ trong bộ nhớ của trang.</p>
-          <button id="login-button" type="button" disabled>Login with Google</button>
-          <p id="login-status" role="status">Chưa đăng nhập.</p>
+          <h2>Tài khoản của bạn</h2>
+          <p id="login-description">Tiếp tục với Google để vào StayHub. Tài khoản mới sẽ được tạo với quyền khách hàng.</p>
+          <div id="login-actions" class="login-actions">
+            <form action="http://localhost:8084/auth/start" method="get">
+              <input type="hidden" name="app" value="app1">
+              <input type="hidden" name="mode" value="login">
+              <button id="login-button" type="submit">Tiếp tục với Google</button>
+            </form>
+          </div>
+          <form id="logout-form" action="http://localhost:8084/auth/logout" method="get" hidden>
+            <input type="hidden" name="app" value="app1">
+            <button id="logout-button" type="submit">Đăng xuất</button>
+          </form>
+          <p id="login-status" class="session-status" role="status" hidden></p>
         </div>
       </section>
 
-      <div class="account-strip" aria-label="Thông tin phiên">
-        <div class="account-item"><span>Người dùng</span><strong id="user-email">Chưa đăng nhập</strong></div>
-        <div class="account-item"><span>Role từ JWT</span><strong id="user-role">Chưa xác định</strong></div>
-        <div class="account-item"><span>Tenant từ JWT</span><strong id="user-tenant">Chưa xác định</strong></div>
-      </div>
-      <p class="status" id="integration-status">Khách sạn, Booking và ADMIN cần JWT.</p>
+      <div id="app-content" hidden>
+        <div class="account-strip" aria-label="Thông tin tài khoản">
+          <div class="account-item"><span>Email</span><strong id="user-email">Chưa đăng nhập</strong></div>
+          <div class="account-item"><span>Loại tài khoản</span><strong id="user-role">Chưa xác định</strong></div>
+          <div class="account-item"><span>Tenant</span><strong id="user-tenant">Chưa xác định</strong></div>
+        </div>
+        <p class="status" id="integration-status">Đăng nhập để tìm phòng và quản lý booking.</p>
 
-      <section class="section" aria-labelledby="search-title">
+        <section class="section" aria-labelledby="search-title">
         <div class="section-heading">
           <div><span class="eyebrow">01 · Tìm phòng</span><h2 id="search-title">Phòng còn trống</h2></div>
           <p>Chỉ hiện loại phòng còn trống ở mọi đêm trong kỳ ở. Kết quả có thể cũ ngay sau khi trả về; Booking API quyết định cuối cùng.</p>
@@ -63,9 +74,9 @@
         </div>
         <ul id="result-list" class="room-list" aria-label="Loại phòng còn trống"></ul>
         <p id="booking-status" class="feedback" role="status"></p>
-      </section>
+        </section>
 
-      <section class="section" aria-labelledby="bookings-title">
+        <section class="section" aria-labelledby="bookings-title">
         <div class="section-heading">
           <div><span class="eyebrow">02 · Booking</span><h2 id="bookings-title">Booking của tôi</h2></div>
           <p id="actions-note">Đăng nhập để xem booking.</p>
@@ -77,9 +88,9 @@
         <p id="booking-action-status" class="feedback" role="status"></p>
         <p class="note"><a href="http://localhost:3002/">Muốn đổi ngày thuê phòng? Mở Support Center</a></p>
         <ul id="booking-list" class="room-list" aria-label="Danh sách booking"></ul>
-      </section>
+        </section>
 
-      <section id="admin-section" class="section" aria-labelledby="admin-title" hidden>
+        <section id="admin-section" class="section" aria-labelledby="admin-title" hidden>
         <div class="section-heading">
           <div><span class="eyebrow">03 · ADMIN</span><h2 id="admin-title">Quản lý khách sạn đã chọn</h2></div>
           <p>Áp dụng cho khách sạn đang chọn ở phần Tìm phòng. Role chỉ điều khiển giao diện; backend xác minh JWT và quyền ADMIN.</p>
@@ -129,7 +140,8 @@
             <p id="admin-price-status" class="feedback" role="status"></p>
           </section>
         </div>
-      </section>
+        </section>
+      </div>
     </main>
 
     <footer class="footer-note">StayHub demo · Thanh toán chỉ là mô phỏng. Claims ở frontend chỉ phục vụ hiển thị; backend xác minh quyền và quyết định kết quả.</footer>

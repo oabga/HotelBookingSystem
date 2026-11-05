@@ -27,14 +27,17 @@ test("USER loads hotels and bookings but not ADMIN tools or a search", async () 
   assert.deepEqual(fetchFn.calls.map(call => call.key).sort(), ["GET /api/bookings", "GET /api/hotels"]);
 });
 
-test("ADMIN opens the tools; role comes from the token on either app", async () => {
-  for (const appId of ["app1", "app2"]) {
-    const doc = new FakeDocument(appId);
-    const app = initApp(doc, fakeAuth("ADMIN"), fakeFetch(routes()), fixedNow);
-    await app.ready;
-    assert.equal(doc.getElementById("admin-section").hidden, false);
-    assert.equal(doc.getElementById("bookings-title").textContent, "Booking trong tenant");
-  }
+test("App 1 blocks ADMIN while App Admin opens tools for ADMIN", async () => {
+  const userPortal = new FakeDocument("app1");
+  const userPortalFetch = fakeFetch(routes());
+  assert.equal(initApp(userPortal, fakeAuth("ADMIN"), userPortalFetch, fixedNow), null);
+  assert.equal(userPortalFetch.calls.length, 0);
+
+  const adminPortal = new FakeDocument("app2");
+  const app = initApp(adminPortal, fakeAuth("ADMIN"), fakeFetch(routes()), fixedNow);
+  await app.ready;
+  assert.equal(adminPortal.getElementById("admin-section").hidden, false);
+  assert.equal(adminPortal.getElementById("bookings-title").textContent, "Booking trong tenant");
 });
 
 test("A 401 from any API tells the user to log in again", async () => {
