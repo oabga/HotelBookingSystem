@@ -1,9 +1,8 @@
 
 # StayHub — Architecture Decision Records (ADR)
 
-> **Version:** 3-App Architecture + Custom IAM  
-> **Updated:** 2026-11-04  
-> **Status:** PROPOSED — Pending G2 Architecture Sign-off  
+> **Updated:** 2026-11-05, đối chiếu với `main` tại commit `1737b60`  
+> **Status:** Ghi nhận các quyết định đang có hiệu lực trong code. Chưa có biên bản G2 trong repository.  
 > **Scope:** Architecture, Authentication, Authorization, Multi-Tenancy, Booking, Inventory, Support, Database & Operations  
 > **Architecture Principle:** Preserve existing Custom IAM — **No Keycloak**
 
@@ -21,7 +20,7 @@ Mục tiêu:
 - Hạn chế thay đổi kiến trúc không cần thiết trong MVP.
 - Cung cấp cơ sở cho code review, integration testing và production hardening.
 
-**Lưu ý:** Các quyết định trong tài liệu này là kiến trúc mục tiêu. Chúng không chứng minh rằng source code, migrations hoặc deployment đã hoàn thành.
+**Lưu ý:** `IMPLEMENTED` nghĩa là quyết định đã có trong code. Mức đã chạy thật ghi ở từng ADR và ở [README.md](README.md#6-mức-độ-kiểm-chứng). ADR có nguồn từ code ghi rõ điều đó, vì lý do chọn cần team xác nhận.
 
 ---
 
@@ -45,31 +44,35 @@ Mục tiêu:
 | G3 — Implementation Verification | Xác minh source code, migrations và tests |
 | G4 — Release Acceptance | Nghiệm thu E2E, security và operational readiness |
 
-**Current status:** Pending G2.
+**Current status:** Repository chưa có biên bản G2, G3, G4.
 
-Không chuyển ADR sang `IMPLEMENTED` chỉ dựa trên tài liệu thiết kế hoặc kết quả test lịch sử của hệ thống hai ứng dụng.
+Không chuyển ADR sang `IMPLEMENTED` chỉ dựa trên tài liệu thiết kế.
 
 ---
 
 ## 3. ADR Register
 
-| ID | Decision | Status | Priority |
+| ID | Decision | Status | Đã chạy thật |
 |---|---|---|---|
-| ADR-001 | Three independent frontend applications | PROPOSED | P0 |
-| ADR-002 | Preserve Custom IAM + Google OIDC + RS256 JWT | PROPOSED | P0 |
-| ADR-003 | HttpSession SSO across three applications | PROPOSED | P0 |
-| ADR-004 | RBAC + Tenant Isolation + Resource Ownership | PROPOSED | P0 |
-| ADR-005 | Shared PostgreSQL for atomic Booking and Inventory | PROPOSED | P0 |
-| ADR-006 | Room-Type Booking with Nightly Inventory | PROPOSED | P0 |
-| ADR-007 | Mock Payment for MVP | PROPOSED | P1 |
-| ADR-008 | Support Ticket Service with USER/ADMIN roles | PROPOSED | P0 |
-| ADR-009 | Immutable Flyway Migrations | PROPOSED | P0 |
-| ADR-010 | Independent JWT Verification at Each Service | PROPOSED | P0 |
-| ADR-011 | Preserve Existing Booking Email Ownership Contract | PROPOSED | P0 |
-| ADR-012 | JWT Fragment Callback for Demo Only | PROPOSED | P1 |
-| ADR-013 | Transactional Inventory Reservation | PROPOSED | P0 |
-| ADR-014 | Minimal IAM Integration Delta | PROPOSED | P0 |
-| ADR-015 | Explicit Service and Data Ownership | PROPOSED | P1 |
+| ADR-001 | Three independent frontend applications | IMPLEMENTED | Test frontend, chưa chạy với Google thật |
+| ADR-002 | Preserve Custom IAM + Google OIDC + RS256 JWT | IMPLEMENTED | Endpoint và chuyển hướng. Chưa đăng nhập Google thật |
+| ADR-003 | HttpSession SSO across three applications | IMPLEMENTED | Chỉ đọc từ code |
+| ADR-004 | RBAC + Tenant Isolation + Resource Ownership | IMPLEMENTED | Workflow Docker |
+| ADR-005 | Shared PostgreSQL for atomic Booking and Inventory | IMPLEMENTED | Workflow Docker |
+| ADR-006 | Room-Type Booking with Nightly Inventory | IMPLEMENTED | Workflow Docker |
+| ADR-007 | Mock Payment for MVP | IMPLEMENTED | Workflow Docker |
+| ADR-008 | Support Ticket Service with USER/ADMIN roles | SUPERSEDED bởi ADR-017 | Không áp dụng |
+| ADR-009 | Immutable Flyway Migrations | IMPLEMENTED | Migration chạy trên DB mới |
+| ADR-010 | Independent JWT Verification at Each Service | IMPLEMENTED | Workflow Docker với JWT của `dev-token` |
+| ADR-011 | Preserve Existing Booking Email Ownership Contract | IMPLEMENTED | Workflow Docker |
+| ADR-012 | JWT Fragment Callback for Demo Only | IMPLEMENTED | Test frontend. Chưa chạy với Google thật |
+| ADR-013 | Transactional Inventory Reservation | IMPLEMENTED | Workflow Docker, 6 request tranh 1 phòng |
+| ADR-014 | Minimal IAM Integration Delta | IMPLEMENTED, đã mở rộng bởi ADR-016, ADR-019 | Một phần |
+| ADR-015 | Explicit Service and Data Ownership | IMPLEMENTED | Đọc từ code |
+| ADR-016 | Chính sách đăng nhập theo từng app, tự tạo tài khoản ở App 1 | IMPLEMENTED | Chỉ đọc từ code |
+| ADR-017 | Support chỉ xử lý phiếu đổi ngày, gọi Booking qua HTTP | IMPLEMENTED | Workflow Docker |
+| ADR-018 | Notification qua transactional outbox | IMPLEMENTED | Workflow Docker |
+| ADR-019 | Đăng xuất chỉ hủy phiên IAM | IMPLEMENTED | Endpoint đã gọi thật |
 
 ---
 
@@ -77,7 +80,7 @@ Không chuyển ADR sang `IMPLEMENTED` chỉ dựa trên tài liệu thiết k�
 
 ## ADR-001 — Three Independent Frontend Applications
 
-**Status:** PROPOSED  
+**Status:** IMPLEMENTED  
 **Priority:** P0  
 **Decision Owner:** Architecture Team
 
@@ -97,9 +100,9 @@ Triển khai ba frontend applications:
 
 | Application | URL | Purpose |
 |---|---|---|
-| Booking Web | `http://localhost:3000` | Hotel discovery and booking |
-| Admin Dashboard | `http://localhost:3001` | Catalog, inventory and booking administration |
-| Support Center | `http://localhost:3002` | Customer support and ticket management |
+| App 1 | `http://localhost:3000` | Hotel discovery and booking |
+| App Admin | `http://localhost:3001` | Inventory view, room types, prices, tenant bookings |
+| Support Center | `http://localhost:3002` | Date-change requests and notifications |
 
 Chỉ sử dụng hai business roles:
 
@@ -142,7 +145,7 @@ ADMIN
 
 ## ADR-002 — Preserve Custom IAM with Google OIDC
 
-**Status:** PROPOSED  
+**Status:** IMPLEMENTED  
 **Priority:** P0  
 **Decision Owner:** IAM Developer + Architecture Team
 
@@ -167,7 +170,7 @@ Với các thành phần:
 - Authorization Code flow.
 - PKCE S256.
 - HttpSession SSO.
-- Pre-provisioned `app_user`.
+- `app_user` theo chính sách ở ADR-016. Quyết định ban đầu là pre-provision toàn bộ.
 - Google `sub` binding.
 - Custom JWT RS256 issuer.
 - JWKS public key endpoint.
@@ -196,7 +199,7 @@ Với các thành phần:
 - Team tự chịu trách nhiệm security hardening.
 - Chưa có full OIDC Authorization Server.
 - Chưa có token revocation.
-- Chưa có Single Logout.
+- Đăng xuất chỉ hủy phiên IAM, xem ADR-019.
 - Cần quản lý signing keys và session lifecycle.
 
 ### Consequences
@@ -209,7 +212,7 @@ Production readiness phải được đánh giá độc lập.
 
 ## ADR-003 — HttpSession SSO Across Three Applications
 
-**Status:** PROPOSED  
+**Status:** IMPLEMENTED  
 **Priority:** P0  
 **Decision Owner:** IAM Developer
 
@@ -224,17 +227,17 @@ Support Center cần tham gia cùng cơ chế.
 Giữ các app identifiers:
 
 ```text
-app1    -> Booking Web
-app2    -> Admin Dashboard
-support -> Support Center
+app1    -> App 1
+app2    -> App Admin
+app3    -> Support Center
 ```
 
 Role-to-app policy:
 
 | Application | Allowed Roles |
 |---|---|
-| Booking | USER |
-| Admin | ADMIN |
+| App 1 | USER |
+| App Admin | ADMIN, chỉ email `IAM_ADMIN_EMAIL` (ADR-016) |
 | Support | USER, ADMIN |
 
 Mỗi lần chuyển ứng dụng:
@@ -266,21 +269,20 @@ Mỗi lần chuyển ứng dụng:
 - Phụ thuộc browser cookie và IAM session.
 - Multi-tab login có thể gặp race với session-wide app selector.
 - JWT expiry và IAM session expiry độc lập.
-- Chưa có cross-app logout.
+- Chưa có đăng xuất giữa các app.
+- Mở một app không được phép sẽ hủy phiên IAM.
 
 ### Consequences
 
-- Phải bổ sung Support callback.
-- Phải enforce role-to-app policy trước JWT issuance.
-- Phải test USER Booking → Support.
-- Phải test ADMIN Admin → Support.
-- Phải kiểm tra multi-tab `sso_app` race.
+- Callback Support và chính sách theo app đã có trong code.
+- Chưa chạy thật SSO App 1 → Support và App Admin → Support, xem [iam-testing.md](iam-testing.md).
+- Rủi ro hai tab song song với `sso_app` vẫn còn và chưa có test.
 
 ---
 
 ## ADR-004 — RBAC + Tenant Isolation + Resource Ownership
 
-**Status:** PROPOSED  
+**Status:** IMPLEMENTED  
 **Priority:** P0  
 **Decision Owner:** Backend Architecture Team
 
@@ -359,7 +361,7 @@ ownerEmail
 
 ## ADR-005 — Shared PostgreSQL for Booking & Inventory
 
-**Status:** PROPOSED  
+**Status:** IMPLEMENTED  
 **Priority:** P0  
 **Decision Owner:** Backend Architecture Team
 
@@ -390,9 +392,10 @@ Các service sử dụng cùng database nhưng phải xác định rõ data owne
 | `room_type` | Catalog |
 | `room_inventory.total` | Catalog |
 | `room_inventory.sold` | Booking |
-| `booking` | Booking |
-| `support_ticket` | Support |
-| `ticket_message` | Support |
+| `booking`, `booking_reschedule` | Booking |
+| `date_change_request` | Support |
+| `notification_outbox` | Support ghi sự kiện, Notification ghi `processed_at` |
+| `notification` | Notification |
 
 ### Rationale
 
@@ -433,7 +436,7 @@ Cross-service writes phải được giới hạn theo ownership contract.
 
 ## ADR-006 — Room-Type Booking with Nightly Inventory
 
-**Status:** PROPOSED  
+**Status:** IMPLEMENTED  
 **Priority:** P0  
 **Decision Owner:** Booking + Catalog Developers
 
@@ -516,7 +519,7 @@ Booking transaction mới là nguồn quyết định cuối cùng về tồn kh
 
 ## ADR-007 — Mock Payment Only in MVP
 
-**Status:** PROPOSED  
+**Status:** IMPLEMENTED  
 **Priority:** P1  
 **Decision Owner:** Product + Booking Team
 
@@ -566,7 +569,9 @@ Mock payment endpoints phải được bảo vệ và không được bật ngo�
 
 ## ADR-008 — Support Ticket Service with Existing Roles
 
-**Status:** PROPOSED  
+> **Đã bị thay thế bởi ADR-017.** Phần dưới được giữ làm lịch sử. Các bảng `support_ticket`, `ticket_message` đã bị xóa ở `support-service` `V2`.
+
+**Status:** SUPERSEDED bởi ADR-017  
 **Priority:** P0  
 **Decision Owner:** Support Developer + Architecture Team
 
@@ -647,13 +652,13 @@ ADMIN chỉ được thao tác trên ticket thuộc tenant.
 
 ## ADR-009 — Immutable Flyway Migrations
 
-**Status:** PROPOSED  
+**Status:** IMPLEMENTED  
 **Priority:** P0  
 **Decision Owner:** Backend + Database Team
 
 ### Context
 
-IAM, Catalog, Booking và Support cùng sử dụng PostgreSQL.
+IAM, Catalog, Booking, Support và Notification cùng sử dụng PostgreSQL.
 
 Thay đổi migration đã chạy có thể gây checksum mismatch và deployment failure.
 
@@ -691,9 +696,12 @@ Booking Tables
     |
     v
 Support Tables
+    |
+    v
+Notification Tables
 ```
 
-Đây là dependency logic; thứ tự và tên migration thực tế phải được xác minh trong repository.
+Tên migration và bảng lịch sử xem [erd.md](erd.md#5-migration).
 
 ### Trade-offs
 
@@ -718,7 +726,7 @@ Disposable local database chỉ được reset khi có sự đồng ý và khôn
 
 ## ADR-010 — Independent JWT Verification at Each Service
 
-**Status:** PROPOSED  
+**Status:** IMPLEMENTED  
 **Priority:** P0  
 **Decision Owner:** Security + Backend Team
 
@@ -774,7 +782,7 @@ Gateway validation không thay thế service-level validation.
 
 ## ADR-011 — Preserve Booking Email Ownership Contract
 
-**Status:** PROPOSED  
+**Status:** IMPLEMENTED  
 **Priority:** P0  
 **Decision Owner:** Booking Developer
 
@@ -802,10 +810,11 @@ AND
 booking.user_email = JWT.email
 ```
 
-Support Service mới có thể sử dụng:
+Support và Notification dùng user ID:
 
 ```text
-support_ticket.requester_user_id = JWT.sub
+date_change_request.requester_user_id = app_user.id
+notification.recipient_user_id = app_user.id
 ```
 
 ### Rationale
@@ -813,7 +822,7 @@ support_ticket.requester_user_id = JWT.sub
 - Tránh breaking changes.
 - Giữ tương thích Booking code.
 - Giảm migration risk.
-- Cho phép Support dùng stable user identifier ngay từ đầu.
+- Cho phép các bảng mới dùng định danh ổn định ngay từ đầu.
 
 ### Trade-offs
 
@@ -831,7 +840,7 @@ Nếu cần migration trong tương lai, phải tạo ADR và migration plan ri�
 
 ## ADR-012 — JWT Fragment Callback for Demo Only
 
-**Status:** PROPOSED  
+**Status:** IMPLEMENTED  
 **Priority:** P1  
 **Decision Owner:** IAM + Frontend Team
 
@@ -869,7 +878,7 @@ Frontend phải:
 - Browser extensions có thể truy cập token tùy quyền.
 - Reload làm mất in-memory token.
 - Chưa có refresh token.
-- Chưa có Single Logout.
+- Đăng xuất không thu hồi JWT đã cấp.
 
 ### Consequences
 
@@ -889,7 +898,7 @@ Các phương án có thể xem xét:
 
 ## ADR-013 — Transactional Inventory Reservation
 
-**Status:** PROPOSED  
+**Status:** IMPLEMENTED  
 **Priority:** P0  
 **Decision Owner:** Booking Developer
 
@@ -973,7 +982,7 @@ Inventory reconciliation mismatches:
 
 ## ADR-014 — Minimum IAM Integration Delta
 
-**Status:** PROPOSED  
+**Status:** IMPLEMENTED  
 **Priority:** P0  
 **Decision Owner:** Architecture + IAM Team
 
@@ -993,6 +1002,8 @@ Chỉ triển khai những thay đổi IAM cần thiết:
 4. Issue new JWT for Support.
 5. Test three-app flows.
 6. Fix security/regression bugs nếu phát hiện.
+
+**Thực tế:** Commit `cf7b01b` đã đi xa hơn phạm vi này: thêm tự tạo tài khoản (ADR-016) và đăng xuất (ADR-019).
 
 ### Rationale
 
@@ -1016,7 +1027,7 @@ Không triển khai:
 - Full OAuth2 Authorization Server.
 - Refresh token infrastructure.
 - Token revocation service.
-- Single Logout.
+- Đăng xuất giữa các app.
 
 trong minimum integration scope nếu chưa có quyết định mới.
 
@@ -1024,7 +1035,7 @@ trong minimum integration scope nếu chưa có quyết định mới.
 
 ## ADR-015 — Explicit Service and Data Ownership
 
-**Status:** PROPOSED  
+**Status:** IMPLEMENTED  
 **Priority:** P1  
 **Decision Owner:** Backend Architecture Team
 
@@ -1041,7 +1052,8 @@ Mỗi service phải có ownership rõ ràng.
 | IAM | `tenant`, `app_user` | Identity, roles, Google binding |
 | Catalog | `hotel`, `room_type`, inventory capacity | Hotel and room catalog |
 | Booking | `booking`, inventory sold quantity | Booking lifecycle and reservations |
-| Support | `support_ticket`, `ticket_message` | Customer support workflow |
+| Support | `date_change_request`, `notification_outbox` | Phiếu đổi ngày |
+| Notification | `notification` | Thông báo trong ứng dụng |
 
 ### Rationale
 
@@ -1065,360 +1077,136 @@ Cross-service data access cần được review và document.
 
 ---
 
+
+## ADR-016 — Chính sách đăng nhập theo từng app
+
+**Status:** IMPLEMENTED  
+**Nguồn:** Code tại commit `cf7b01b`. Lý do chọn và các đánh đổi dưới đây được suy ra từ code, cần team xác nhận.
+
+### Context
+
+ADR-002 ban đầu yêu cầu mọi `app_user` phải được tạo trước, và tài liệu cũ cấm tự tạo tài khoản.
+
+### Decision
+
+| App | Chưa có tài khoản | Điều kiện nhận JWT |
+|---|---|---|
+| App 1 | Tạo `USER` trong `IAM_REGISTRATION_DEFAULT_TENANT_ID` | Email khác `IAM_ADMIN_EMAIL`, role `USER` |
+| App Admin | Tạo `ADMIN`, chỉ cho `IAM_ADMIN_EMAIL` | Email đúng `IAM_ADMIN_EMAIL`. Tài khoản `USER` được nâng thành `ADMIN` |
+| Support | Từ chối | Tài khoản đã tồn tại |
+
+Mọi app đều yêu cầu `email_verified` và `google_sub` khớp.
+
+### Trade-offs
+
+**Advantages:**
+
+- Người dùng mới vào được App 1 mà không cần seed.
+- Không có bước quản trị tài khoản khi demo.
+
+**Disadvantages:**
+
+- Mọi Gmail đã xác minh đều có tài khoản `USER` trong tenant mặc định.
+- Chỉ một email vào được App Admin, nên chỉ một tenant có người quản trị qua app này.
+- ADMIN khác chỉ dùng được Support.
+- Email admin là cấu hình triển khai, Compose đang đặt sẵn một email cá nhân.
+
+### Consequences
+
+Thay thế quy tắc "Không auto-provision users" của tài liệu cũ. Xem `OPEN-016`.
+
+---
+
+## ADR-017 — Support chỉ xử lý phiếu đổi ngày, gọi Booking qua HTTP
+
+**Status:** IMPLEMENTED  
+**Nguồn:** Code, `support-service/README.md`.
+
+### Context
+
+Support Center hiện chỉ cần chức năng xin đổi ngày. Booking là nơi duy nhất được đổi `booking` và `room_inventory.sold`.
+
+### Decision
+
+- Gỡ ticket và tin nhắn chung, thay bằng `date_change_request` (`support-service` `V2`).
+- Support gọi Booking qua HTTP bằng chính JWT của người đang thao tác, không dùng tài khoản dịch vụ.
+- Booking đổi ngày trước, phiếu ghi nhận sau. `requestId` giúp duyệt lại an toàn.
+- Không giữ phòng trong lúc phiếu chờ duyệt.
+
+### Trade-offs
+
+- Booking tự kiểm tra role và tenant như mọi request khác, không cần cơ chế xác thực nội bộ.
+- Support giữ khóa dòng phiếu và một kết nối DB trong lúc gọi Booking, tối đa khoảng 13 giây.
+- Lúc duyệt vẫn có thể hết phòng.
+- Support vẫn đọc trực tiếp `app_user` và `booking_reschedule`.
+
+### Consequences
+
+Giải quyết `OPEN-006` theo phương án B. Các câu hỏi về vòng đời ticket không còn áp dụng.
+
+---
+
+## ADR-018 — Notification qua transactional outbox
+
+**Status:** IMPLEMENTED  
+**Nguồn:** Code, `notification-service/README.md`.
+
+### Decision
+
+Support ghi `notification_outbox` cùng transaction với kết quả phiếu. Job của Notification đọc bảng này mỗi 2 giây bằng `FOR UPDATE SKIP LOCKED` và tạo `notification`. Không có API tạo thông báo, và Support không gọi Notification.
+
+### Trade-offs
+
+- Phiếu đã có kết quả thì chắc chắn có sự kiện, kể cả khi Notification đang tắt.
+- Không cần message broker hay tài khoản dịch vụ.
+- Hai service phụ thuộc cùng một bảng.
+- Người dùng thấy thông báo chậm theo chu kỳ job cộng chu kỳ gọi lại 15 giây của frontend.
+
+---
+
+## ADR-019 — Đăng xuất chỉ hủy phiên IAM
+
+**Status:** IMPLEMENTED  
+**Nguồn:** Code tại commit `cf7b01b`. Cần team xác nhận đây là phạm vi mong muốn.
+
+### Decision
+
+`GET /auth/logout?app=...` hủy `HttpSession` của IAM rồi chuyển về callback kèm `#logged_out`. Chỉ App 1 có nút. Lệnh này không thu hồi JWT và không hủy phiên Google. `prompt=select_account` làm Google hiện màn hình chọn tài khoản ở lần sau.
+
+### Trade-offs
+
+- Đơn giản, không cần danh sách thu hồi.
+- JWT ở các tab khác vẫn dùng được đến khi hết hạn.
+- Là `GET` và CSRF đã tắt, nên trang khác có thể kích hoạt đăng xuất.
+
+---
+
 # 5. Decisions Still Open
 
-Các vấn đề sau chưa được chốt tại G2.
-
-| ID | Open Decision | Priority | Owner |
+| ID | Open Decision | Priority | Hiện trạng |
 |---|---|---|---|
-| OPEN-001 | Production JWT delivery strategy | High | IAM + Security |
-| OPEN-002 | IAM logout and cross-app session invalidation | High | IAM |
-| OPEN-003 | Multi-tab `sso_app` race solution | Medium | IAM |
-| OPEN-004 | Persistent RSA signing keys and rotation | High | IAM + DevOps |
-| OPEN-005 | Multi-tenant user membership policy | Medium | Architecture |
-| OPEN-006 | Support-to-Booking ownership validation method | High | Support + Booking |
-| OPEN-007 | Ticket status transitions and reopen policy | Medium | Support |
-| OPEN-008 | Ticket retention, SLA and assignment rules | Medium | Product + Support |
-| OPEN-009 | Support Service port and exact API routes | High | Backend + Gateway |
-| OPEN-010 | DTO and endpoint contract freeze | High | Backend + Frontend |
-| OPEN-011 | Flyway history strategy for shared PostgreSQL | High | Database Team |
-| OPEN-012 | Actual Spring Boot/Gradle versions | Medium | Backend |
-| OPEN-013 | Booking legacy `room` migration compatibility | Critical | Booking + Catalog |
-| OPEN-014 | JWT audience and app-specific claims | Medium | IAM + Security |
-| OPEN-015 | Token revocation and stale-role mitigation | High for production | IAM + Security |
+| OPEN-001 | Cơ chế trao JWT ở production | High | Demo dùng URL fragment. Khuyến nghị đánh giá BFF trước production |
+| OPEN-002 | Đăng xuất giữa các app | High | Xem ADR-019. Cần quyết định: nút ở mọi app, báo các tab khác, thu hồi JWT, đổi `GET` thành `POST` |
+| OPEN-003 | Race `sso_app` khi hai tab song song | Medium | Còn nguyên. Hướng xử lý: gắn app đích với từng authorization request |
+| OPEN-004 | RSA key bền vững và xoay vòng | High | Key sinh lại mỗi lần khởi động, `kid` cố định. Đã đo hệ quả, xem [iam-sso.md](iam-sso.md#81-quản-lý-key). Nên sửa `kid` trước, ngay cả ở demo |
+| OPEN-005 | Một người thuộc nhiều tenant | Medium | `app_user` chỉ có một `tenant_id` |
+| OPEN-010 | Chốt API contract | Medium | [api-contract.md](api-contract.md) mô tả API hiện có. Chưa có sign-off và chưa có phiên bản API |
+| OPEN-014 | Có cần `aud` trong JWT | Medium | JWT chưa có `aud`, service chưa kiểm tra |
+| OPEN-015 | Thu hồi JWT, role cũ | High for production | Support và Notification đã đối chiếu role với DB. Catalog và Booking tin JWT đến khi hết hạn |
+| OPEN-016 | Ai được vào App Admin | High | Xem ADR-016. Cần quyết định có giữ một email duy nhất không, và cách hỗ trợ tenant khác |
+| OPEN-017 | Ai được tự đăng ký | Medium | App 1 nhận mọi Gmail đã xác minh. Cần chốt trước khi mở rộng |
 
----
+## 6. Decisions Resolved
 
-## 6. Open Decision Analysis
-
-### OPEN-001 — Production JWT Delivery
-
-**Current demo:**
-
-```text
-IAM -> Frontend callback/#token=JWT
-```
-
-**Candidates:**
-
-| Option | Advantages | Disadvantages |
+| ID | Câu hỏi | Kết quả |
 |---|---|---|
-| JWT in memory | Simple | Exposed to XSS |
-| BFF + HttpOnly cookie | Better token isolation | Additional backend layer |
-| Dedicated OAuth2/OIDC client architecture | Standardized flow | Requires architecture changes |
-
-**Current recommendation:** Preserve demo flow for MVP; evaluate BFF before production.
-
-**Status:** OPEN.
-
----
-
-### OPEN-002 — IAM Single Logout
-
-Current behavior:
-
-```text
-Frontend clears JWT
-    |
-    v
-IAM HttpSession may remain valid
-```
-
-Required decision:
-
-- Logout current app only?
-- Logout all StayHub apps?
-- Invalidate IAM HttpSession?
-- Revoke outstanding JWTs?
-- Redirect to Google logout or not?
-
-**Status:** OPEN.
-
----
-
-### OPEN-003 — Multi-Tab Session Race
-
-Current risk:
-
-```text
-HttpSession.sso_app
-```
-
-Possible solution:
-
-Bind app destination to OAuth2 authorization request/state instead of a single mutable session attribute.
-
-**Status:** OPEN — requires source verification and tests.
-
----
-
-### OPEN-004 — RSA Signing Key Persistence
-
-Current reported behavior:
-
-```text
-IAM restart -> new RSA keypair
-```
-
-Production options:
-
-- Persistent private key.
-- Secret management.
-- Key rotation with `kid`.
-- JWKS overlapping keys.
-
-**Status:** OPEN.
-
----
-
-### OPEN-005 — Multi-Tenant Membership
-
-Current logical model:
-
-```text
-app_user
-    |
-    +-- tenant_id
-    +-- role
-```
-
-Future option:
-
-```text
-app_user
-    |
-    +-- user_tenant_membership
-            |
-            +-- tenant_id
-            +-- role
-```
-
-Không triển khai membership model mới trong MVP nếu chưa có requirement.
-
-**Status:** OPEN.
-
----
-
-### OPEN-006 — Support Booking Ownership Validation
-
-Hai phương án:
-
-**Option A — Shared Database Query**
-
-Support đọc booking data trong PostgreSQL chung.
-
-Advantages:
-
-- Low latency.
-- Simple implementation.
-- No network dependency.
-
-Disadvantages:
-
-- Strong schema coupling.
-- Support phụ thuộc Booking tables.
-- Data ownership boundary yếu hơn.
-
-**Option B — Booking Internal API**
-
-Support gọi Booking Service để xác minh ownership.
-
-Advantages:
-
-- Clear service ownership.
-- Encapsulated booking rules.
-- Easier future database separation.
-
-Disadvantages:
-
-- Additional network latency.
-- Service availability dependency.
-- Requires internal authentication and API contract.
-
-**Decision required:** Chọn một phương án trước khi hoàn thiện Support API.
-
-**Status:** OPEN.
-
----
-
-### OPEN-007 — Ticket State Machine
-
-Proposed:
-
-```text
-OPEN -> IN_PROGRESS -> RESOLVED -> CLOSED
-```
-
-Cần xác định:
-
-- Có cho phép `RESOLVED -> IN_PROGRESS` không?
-- Có cho phép reopen `CLOSED` không?
-- USER có được đóng ticket không?
-- ADMIN có được chuyển trực tiếp `OPEN -> RESOLVED` không?
-- Có cần cancellation state không?
-
-**Status:** OPEN.
-
----
-
-### OPEN-008 — Ticket Retention & SLA
-
-Cần thống nhất:
-
-- Ticket retention period.
-- Message retention period.
-- SLA response targets.
-- Assignment policy.
-- Audit requirements.
-- Data deletion policy.
-
-**Status:** OPEN.
-
----
-
-### OPEN-009 — Support Port & API Routing
-
-Current:
-
-```text
-Support Service Port: TBD
-```
-
-Proposed Gateway prefix:
-
-```text
-/api/support/**
-```
-
-Không tự ý freeze port hoặc route khi chưa thống nhất API contract.
-
-**Status:** OPEN.
-
----
-
-### OPEN-010 — API Contract Freeze
-
-Cần thống nhất:
-
-- Endpoint paths.
-- Request DTOs.
-- Response DTOs.
-- Error format.
-- Pagination.
-- Ticket status transitions.
-- Authorization policy.
-- API versioning.
-
-**Status:** OPEN.
-
----
-
-### OPEN-011 — Flyway History Strategy
-
-Shared PostgreSQL có thể sử dụng:
-
-- Separate Flyway history per service.
-- Coordinated shared migration ownership.
-
-Cần đánh giá theo repository và deployment hiện tại.
-
-Không thay đổi Flyway history tùy tiện.
-
-**Status:** OPEN.
-
----
-
-### OPEN-012 — Actual Build Versions
-
-Cần audit:
-
-- Java version.
-- Spring Boot version.
-- Spring Security version.
-- Gradle version.
-- PostgreSQL version.
-- Flyway version.
-- Testcontainers version.
-
-Không mặc định toàn bộ service đã sử dụng cùng phiên bản.
-
-**Status:** OPEN.
-
----
-
-### OPEN-013 — Legacy Booking Migration
-
-Developer đã báo khả năng Booking migration tham chiếu:
-
-```text
-room
-```
-
-Trong khi target data model sử dụng:
-
-```text
-room_type
-room_inventory
-```
-
-Required:
-
-1. Inspect actual migration.
-2. Verify Catalog schema.
-3. Verify Booking foreign keys.
-4. Create additive migration if required.
-5. Run integration tests.
-
-**Status:** OPEN — Critical blocker until verified.
-
----
-
-### OPEN-014 — JWT Audience Contract
-
-Current documented claims:
-
-```text
-iss
-sub
-email
-tenant_id
-role
-iat
-exp
-```
-
-Cần quyết định:
-
-- Có thêm `aud` không?
-- Audience chung cho Gateway và services?
-- Có cần app-specific token claims không?
-- Service có cần kiểm tra token audience riêng không?
-
-Không tự ý enforce `aud` nếu IAM chưa phát claim này.
-
-**Status:** OPEN.
-
----
-
-### OPEN-015 — Stale Role & Token Revocation
-
-Current limitation:
-
-```text
-JWT role is a signed snapshot
-```
-
-Khi role thay đổi trong database, JWT đã phát có thể tiếp tục hợp lệ đến khi hết hạn.
-
-Candidates:
-
-- Short-lived JWT.
-- Token version.
-- Revocation list.
-- Critical-action authorization recheck.
-- Session invalidation.
-
-**Status:** OPEN — production hardening.
+| OPEN-006 | Support xác minh quyền với đơn thế nào | Gọi Booking qua HTTP bằng JWT của người thao tác (ADR-017) |
+| OPEN-007 | Vòng đời ticket | Không còn áp dụng, ticket đã bị gỡ |
+| OPEN-008 | Lưu trữ và SLA của ticket | Không còn áp dụng ở dạng cũ. Chính sách lưu trữ dữ liệu vẫn chưa có |
+| OPEN-009 | Cổng và route của Support | Cổng `8085`, route `/api/support/**` |
+| OPEN-011 | Lịch sử Flyway | Mỗi service một bảng `flyway_schema_history_*` |
+| OPEN-012 | Phiên bản công cụ | Java 21, Spring Boot 3.3.5, Spring Cloud 2023.0.3, Gradle 9.8.2, PostgreSQL 16 |
+| OPEN-013 | Booking còn tham chiếu `room` cũ | Đã hết. Booking `V1` dùng `room_type`, migration chạy thành công trên DB mới |
 
 ---
 
@@ -1431,7 +1219,8 @@ Candidates:
 | Separate databases for Booking and Inventory | Deferred | Requires distributed consistency strategy |
 | Physical-room assignment | Deferred | Beyond MVP |
 | Real payment gateway | Deferred | Scope control |
-| Realtime support chat | Deferred | Ticket workflow sufficient |
+| Realtime support chat | Deferred | Ngoài phạm vi |
+| Ticket hỗ trợ chung | Removed | Support Center hiện chỉ cần đổi ngày (ADR-017) |
 | Full OIDC Authorization Server | Deferred | Existing IAM integration is priority |
 | Immediate migration to `booking.user_id` | Deferred | Preserve current Booking contract |
 | JWT sharing between frontend apps | Rejected | Apps should obtain tokens through IAM |
@@ -1456,7 +1245,7 @@ StayHub JWT RS256
 ```
 
 - Không dùng Google ID Token trực tiếp cho business APIs.
-- Không auto-provision users.
+- Chỉ tạo tài khoản theo chính sách ở ADR-016.
 - Không bỏ qua `google_sub` binding.
 - Không phát JWT cho app trái role.
 
@@ -1496,10 +1285,11 @@ Correct Ownership
 
 ## 8.5. Support
 
-- USER chỉ truy cập own tickets.
-- ADMIN chỉ truy cập tenant tickets.
-- Message author và timestamp được lưu.
-- Booking reference phải được authorization-checked.
+- USER chỉ thao tác trên phiếu và đơn của mình.
+- ADMIN chỉ thao tác trong tenant.
+- Mỗi đơn tối đa một phiếu `PENDING`.
+- Chỉ Booking được đổi `booking` và `sold`.
+- Phiếu đã có kết quả thì chắc chắn có sự kiện trong `notification_outbox`.
 
 ---
 
@@ -1516,7 +1306,9 @@ flowchart TD
     F["ADR-006<br/>Nightly Inventory"]
     G["ADR-013<br/>Atomic Reservation"]
 
-    H["ADR-008<br/>Support Service"]
+    H["ADR-017<br/>Support đổi ngày"]
+    K["ADR-018<br/>Outbox"]
+    L["ADR-016<br/>Chính sách theo app"]
     I["ADR-009<br/>Flyway"]
     J["ADR-015<br/>Data Ownership"]
 
@@ -1533,6 +1325,9 @@ flowchart TD
     I --> H
     J --> H
     J --> G
+    H --> K
+    A --> L
+    L --> B
 ```
 
 ---
@@ -1545,8 +1340,8 @@ flowchart TD
 - [ ] Không sử dụng Keycloak.
 - [ ] Google OIDC + PKCE S256 được giữ nguyên.
 - [ ] JWT RS256 contract được thống nhất.
-- [ ] `app1`, `app2`, `support` được thống nhất.
-- [ ] Role-to-app policy được phê duyệt.
+- [ ] `app1`, `app2`, `app3` được thống nhất.
+- [ ] Chính sách theo app ở ADR-016 được phê duyệt.
 - [ ] Support callback được phê duyệt.
 
 ## Backend Architecture
@@ -1555,7 +1350,7 @@ flowchart TD
 - [ ] Independent JWT verification được thống nhất.
 - [ ] Tenant isolation được thống nhất.
 - [ ] Booking ownership contract được giữ nguyên.
-- [ ] Support ownership validation approach được quyết định.
+- [ ] Cách Support gọi Booking ở ADR-017 được phê duyệt.
 
 ## Database & Inventory
 
@@ -1563,20 +1358,19 @@ flowchart TD
 - [ ] Nightly inventory model được chấp thuận.
 - [ ] Atomic booking transaction được chấp thuận.
 - [ ] Flyway ownership được thống nhất.
-- [ ] Legacy Booking migration được kiểm tra.
+- [ ] Thứ tự migration của 5 service được phê duyệt.
 
 ## Support
 
-- [ ] Ticket lifecycle được thống nhất.
-- [ ] Ticket API contract được thống nhất.
-- [ ] Support Service port được xác định.
-- [ ] USER/ADMIN permissions được thống nhất.
-- [ ] Ticket retention/SLA scope được xác định.
+- [ ] Luồng phiếu đổi ngày được phê duyệt.
+- [ ] API Support và Notification được phê duyệt.
+- [ ] Quyền USER và ADMIN được phê duyệt.
+- [ ] Chính sách lưu trữ dữ liệu được xác định.
 
 ## Operations & Security
 
 - [ ] Demo-only JWT fragment limitation được ghi nhận.
-- [ ] IAM Single Logout limitation được ghi nhận.
+- [ ] Giới hạn đăng xuất ở ADR-019 được ghi nhận.
 - [ ] RSA key persistence requirement được ghi nhận.
 - [ ] Multi-tab session race được đánh giá.
 - [ ] Production hardening backlog được xác định.
@@ -1644,69 +1438,28 @@ Tài liệu liên quan.
 | `../README.md` | Project documentation overview |
 | `architecture.md` | System architecture |
 | `iam-sso.md` | Custom IAM and SSO |
-| `iam-integration-tasks.md` | IAM integration implementation plan |
-| `iam-testing.md` | IAM acceptance tests |
+| `iam-integration-tasks.md` | Việc đã xong và việc còn lại của IAM |
+| `iam-testing.md` | Kiểm thử IAM và SSO |
 | `api-contract.md` | API contracts and authorization |
-| `data-model.md` | Database and inventory model |
-| `workflows.md` | End-to-end workflows |
+| `data-model.md`, `erd.md` | Quy tắc dữ liệu và schema |
+| `../stayhub-sequence-diagrams.md` | End-to-end workflows |
 | `operations-and-tests.md` | Operations, migrations and testing |
 
 ---
 
 # 13. Final Architecture Status
 
-```text
-PROJECT:
-    STAYHUB
-
-ARCHITECTURE:
-    THREE FRONTEND APPLICATIONS
-    CUSTOM IAM
-    SPRING BOOT MICROSERVICES
-    SHARED POSTGRESQL MVP
-
-AUTHENTICATION:
-    GOOGLE OIDC
-    AUTHORIZATION CODE + PKCE S256
-    HTTPSESSION SSO
-
-AUTHORIZATION:
-    CUSTOM JWT RS256
-    JWKS
-    RBAC
-    TENANT ISOLATION
-    RESOURCE OWNERSHIP
-
-BOOKING:
-    ROOM-TYPE RESERVATION
-    NIGHTLY INVENTORY
-    ATOMIC STOCK HOLD
-    MOCK PAYMENT
-
-SUPPORT:
-    TICKET-BASED WORKFLOW
-    USER / ADMIN ROLES
-    PROPOSED SERVICE
-
-MIGRATIONS:
-    FLYWAY
-    IMMUTABLE APPLIED MIGRATIONS
-
-KEYCLOAK:
-    NOT USED
-
-ADR APPROVAL:
-    PENDING G2 SIGN-OFF
-
-IMPLEMENTATION VERIFICATION:
-    PENDING G3
-
-RELEASE ACCEPTANCE:
-    PENDING G4
-
-PRODUCTION READINESS:
-    NOT ESTABLISHED
-```
+| Mảng | Hiện trạng |
+|---|---|
+| Kiến trúc | Ba frontend, Custom IAM, Spring Boot microservices, PostgreSQL dùng chung |
+| Xác thực | Google OIDC, Authorization Code + PKCE S256, HttpSession SSO, chính sách theo app |
+| Phân quyền | JWT RS256, JWKS, RBAC, tách tenant, quyền sở hữu |
+| Đặt phòng | Theo loại phòng, tồn kho từng đêm, giữ phòng trong transaction, thanh toán mô phỏng |
+| Hỗ trợ | Phiếu đổi ngày, thông báo qua outbox |
+| Migration | Flyway, không sửa migration đã áp dụng |
+| Keycloak | Không dùng |
+| Sign-off G2, G3, G4 | Chưa có biên bản trong repository |
+| Production readiness | Chưa đạt |
 
 ---
 
@@ -1717,11 +1470,11 @@ StayHub ưu tiên **tái sử dụng kiến trúc hiện tại, giảm integrati
 Các quyết định trọng tâm:
 
 1. Giữ Custom IAM với Google OIDC, PKCE S256, HttpSession SSO và JWT RS256.
-2. Mở rộng từ hai frontend lên ba frontend mà không thay đổi authentication stack.
+2. Mở rộng từ hai frontend lên ba frontend mà không thay đổi authentication stack, và áp dụng chính sách đăng nhập theo từng app.
 3. Enforce RBAC, tenant isolation và resource ownership tại backend.
 4. Sử dụng shared PostgreSQL cho Booking và Inventory trong MVP để bảo đảm atomic transactions.
 5. Bán phòng theo room type và nightly inventory thay vì physical-room assignment.
-6. Giữ mock payment và Support ticket workflow để kiểm soát phạm vi MVP.
+6. Giữ mock payment và phiếu đổi ngày để kiểm soát phạm vi MVP.
 7. Bảo toàn existing IAM/Booking contracts và Flyway migration history.
 8. Chỉ mở rộng kiến trúc khi có requirement, evidence và quyết định được phê duyệt.
 

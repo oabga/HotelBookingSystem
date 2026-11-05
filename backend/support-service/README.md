@@ -64,7 +64,7 @@ Migration thêm `UNIQUE (tenant_id, id)` vào `app_user` và `booking` để có
 ./gradlew :support-service:bootRun
 
 # Docker
-docker compose --profile dev-test up --build -d --wait
+docker compose --profile workflow up --build -d --wait
 
 # Test, cần JDK 21 và Docker. Thiếu Docker thì test tích hợp fail, không bị bỏ qua
 ./gradlew :support-service:test
@@ -74,4 +74,3 @@ docker compose --profile dev-test up --build -d --wait
 
 - ADMIN gọi trực tiếp `POST /api/bookings/{id}/reschedule` thì đổi được ngày mà không qua phiếu; quyền này ADMIN đã có khi duyệt nên chưa chặn.
 - Phiếu chờ quá lâu không tự hết hạn. Nếu đơn đã tới ngày nhận phòng, duyệt sẽ trả 409 và admin từ chối phiếu.
-- Contract v5 trong `docs/documents/` vẫn mô tả ticket chung và ghi notification ngoài phạm vi MVP; service này đi theo yêu cầu đổi ngày. Hai bên cần được thống nhất ở G2.

@@ -5,7 +5,7 @@ Compose có service Adminer để xem trực tiếp database PostgreSQL đang ch
 ## Chạy
 
 ```bash
-cd /Volumes/DATA/JIKAY/src/project-demo/HotelBookingSystem/backend
+cd backend
 docker compose up -d postgres adminer
 ```
 
@@ -21,7 +21,7 @@ Mở <http://127.0.0.1:8083>.
 | Password | `hotelbooking` |
 | Database | `hotelbooking` |
 
-Trong Adminer, chọn bảng `app_user`, `hotel`, `room_type`, `room_inventory` hoặc `booking` rồi chọn **Select data**. Support tables chỉ xuất hiện sau khi có migration Support.
+Trong Adminer, chọn bảng `app_user`, `hotel`, `room_type`, `room_inventory` hoặc `booking` rồi chọn **Select data**. Các bảng khác gồm `booking_reschedule`, `date_change_request`, `notification_outbox`, `notification`, xuất hiện khi các service tương ứng đã chạy migration.
 
 Port 8083 chỉ bind vào loopback của máy này, nên UI không được mở trực tiếp ra mạng LAN/Internet. Để dừng Adminer mà giữ PostgreSQL và dữ liệu:
 

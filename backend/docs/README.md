@@ -1,29 +1,35 @@
-# StayHub Documentation — 3 Apps + IAM hiện tại (chuẩn team)
+# StayHub Documentation
 
-**Kiến trúc chốt:** Google OIDC → `iam-service :8084` (Spring Security OAuth2 Client + HttpSession SSO + RS256 JWT/JWKS) → Booking, Admin, Support. **Không Keycloak.**
+**Kiến trúc:** Google OIDC → `iam-service :8084` (Spring Security OAuth2 Client, HttpSession SSO, JWT RS256, JWKS) → App 1, App Admin, Support Center → API Gateway `:8080` → Catalog, Booking, Support, Notification. **Không dùng Keycloak.**
+
+Các tài liệu mô tả hệ thống đang có trong code, đối chiếu ngày 05/11/2026 tại commit `1737b60`. Điều gì đã chạy thật và điều gì mới đọc từ code được ghi ở [documents/README.md](documents/README.md#6-mức-độ-kiểm-chứng).
 
 ## Quyền truy cập
-| App | URL dev | Role |
-|---|---|---|
-| Booking | :3000 | USER |
-| Admin Dashboard | :3001 | ADMIN |
-| Support Center | :3002 (proposed) | USER + ADMIN |
+
+| App | Mã IAM | URL dev | Ai nhận được JWT |
+|---|---|---|---|
+| App 1 | `app1` | `:3000` | Tài khoản `USER`. Email mới được tự tạo tài khoản |
+| App Admin | `app2` | `:3001` | Chỉ email `IAM_ADMIN_EMAIL`, role `ADMIN` |
+| Support Center | `app3` | `:3002` | Mọi tài khoản đã tồn tại, `USER` hoặc `ADMIN` |
 
 ## Đọc tài liệu theo thứ tự
-1. `docs/architecture.md` — thành phần, flow, boundaries.
-2. `docs/iam-sso.md` — kiến thức và sequence IAM của developer, mở rộng 3 app.
-3. `docs/iam-integration-tasks.md` — delta tối thiểu IAM + Support + Frontend.
-4. `docs/iam-testing.md` — terminal/browser acceptance test.
-5. `docs/api-contract.md` — HTTP, role matrix và API Support đề xuất.
-6. `docs/data-model.md` — tenant, booking inventory, support ticket.
-7. `docs/workflows.md` — vòng đời USER/ADMIN và SSO.
-8. `docs/operations-and-tests.md` — migration, acceptance, blocker.
-9. `docs/decisions.md` — quyết định kiến trúc.
 
-## Phân biệt trạng thái
-- **Dev documented existing:** OAuth2 Google + PKCE, pre-provision, `google_sub`, custom RS256 JWT/JWKS, Gateway/Catalog validation, 2-app SSO (theo báo cáo dev).
-- **To implement:** support callback thứ 3, IAM role-to-app policy, Support service/ticket, E2E 3-app.
-- **Known blocker:** Booking migration tham chiếu bảng `room` cũ (theo báo cáo dev, cần xác minh).
-- **Demo-only debt:** fragment JWT, keypair reset on IAM restart, thiếu refresh/revoke/logout, session app selector multi-tab race.
+1. [documents/README.md](documents/README.md): tổng quan và bản đồ tài liệu.
+2. [documents/architecture.md](documents/architecture.md): thành phần, ranh giới, giới hạn.
+3. [documents/iam-sso.md](documents/iam-sso.md): đăng nhập, chính sách theo app, SSO, JWT.
+4. [documents/api-contract.md](documents/api-contract.md): HTTP API.
+5. [documents/data-model.md](documents/data-model.md): quy tắc dữ liệu.
+6. [documents/erd.md](documents/erd.md): schema.
+7. [stayhub-sequence-diagrams.md](stayhub-sequence-diagrams.md): sequence diagram mọi luồng.
+8. [documents/operations-and-tests.md](documents/operations-and-tests.md): cấu hình, chạy, test.
+9. [documents/iam-testing.md](documents/iam-testing.md): kiểm thử IAM và SSO.
+10. [documents/iam-integration-tasks.md](documents/iam-integration-tasks.md): việc còn lại của IAM.
+11. [documents/decisions.md](documents/decisions.md): quyết định kiến trúc.
+12. [build/README.md](build/README.md): build và rebuild Docker.
 
-Đây là bản hợp nhất documentation, **không phải xác nhận code đã chạy**. Không commit secrets/tokens/cookies thật.
+## Trạng thái
+
+- **Đã có trong code:** Google OIDC + PKCE, chính sách theo app, tự tạo tài khoản ở App 1, đăng xuất, JWT RS256, JWKS, Gateway, Catalog, Booking, Support đổi ngày, Notification, ba frontend.
+- **Đã chạy thật:** workflow API trên Docker với JWT của `dev-token`, các endpoint không cần đăng nhập Google của IAM.
+- **Chưa chạy thật:** đăng nhập bằng tài khoản Google, SSO khi đã có phiên, JWT do IAM ký đi qua Gateway.
+- **Chưa có:** quản lý khách sạn, sửa tồn kho theo đêm, thanh toán thật, ticket hỗ trợ chung, thu hồi JWT, refresh token.

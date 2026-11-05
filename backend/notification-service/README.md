@@ -1,6 +1,6 @@
 # notification-service
 
-Thông báo trong ứng dụng, cổng `8083`. Hiện dùng để báo kết quả duyệt hoặc từ chối yêu cầu đổi ngày. Chưa có email hay push.
+Thông báo trong ứng dụng, cổng `8083`. Khi chạy bằng Docker Compose, cổng host là `8086`. Hiện dùng để báo kết quả duyệt hoặc từ chối yêu cầu đổi ngày. Chưa có email hay push.
 
 ## API
 
