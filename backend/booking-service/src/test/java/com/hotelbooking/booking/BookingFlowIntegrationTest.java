@@ -2,6 +2,9 @@ package com.hotelbooking.booking;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hotelbooking.booking.domain.Booking;
+import com.hotelbooking.booking.domain.BookingRepository;
+import com.hotelbooking.booking.security.TenantIdentifierResolver;
 import com.hotelbooking.booking.service.BookingExpiryJob;
 import com.hotelbooking.booking.support.TestJwtIssuer;
 import org.junit.jupiter.api.AfterEach;
@@ -19,6 +22,9 @@ import org.springframework.core.io.support.EncodedResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -26,6 +32,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -36,7 +43,9 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.TimeZone;
@@ -45,11 +54,13 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import static com.hotelbooking.booking.support.TestJwtIssuer.TENANT_A;
 import static com.hotelbooking.booking.support.TestJwtIssuer.TENANT_B;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Chạy service thật với PostgreSQL thật: Flyway, ddl-auto=validate, JWT qua JWKS, trừ và trả room_inventory.
@@ -146,6 +157,9 @@ class BookingFlowIntegrationTest {
 
     @Autowired
     private BookingExpiryJob expiryJob;
+
+    @Autowired
+    private BookingRepository bookingRepository;
 
     @Autowired
     private ScheduledAnnotationBeanPostProcessor scheduler;
@@ -655,7 +669,48 @@ class BookingFlowIntegrationTest {
         assertThat(detail(otherTenant)).isEqualTo(detail(missing));
     }
 
+    // ---------- Hibernate @TenantId ----------
+
+    /** Truy vấn JPQL không ghi tenant vẫn bị lọc theo JWT; không có JWT thì không thấy gì; job thấy mọi tenant. */
+    @Test
+    void tenantIdFilter_scopesQueriesWithoutExplicitTenant() throws Exception {
+        long aBooking = createdId(book(STANDARD_A, "2026-12-10", "2026-12-11", 1, userA1()));
+        long bBooking = createdId(book(STANDARD_B, "2026-12-10", "2026-12-11", 1, userB1()));
+
+        assertThat(asTenant(TENANT_A, () -> bookingIds(bookingRepository.findAll()))).containsExactly(aBooking);
+        assertThat(asTenant(TENANT_B, () -> bookingIds(bookingRepository.findAll()))).containsExactly(bBooking);
+        assertThat(bookingRepository.findAll()).isEmpty();
+        assertThat(TenantIdentifierResolver.runAsSystem(() -> bookingIds(bookingRepository.findAll())))
+                .containsExactly(aBooking, bBooking);
+    }
+
+    /** Lưu entity mang tenant khác tenant trong JWT bị Hibernate từ chối trước khi xuống database. */
+    @Test
+    void tenantIdFilter_rejectsInsertForAnotherTenant() {
+        Instant createdAt = NOW.truncatedTo(ChronoUnit.SECONDS);
+        Booking foreign = Booking.pendingPayment(TENANT_A, STANDARD_A, USER_A1, LocalDate.parse("2026-12-10"),
+                LocalDate.parse("2026-12-11"), 1, new BigDecimal("500000"), createdAt.plusSeconds(900), createdAt);
+
+        assertThatThrownBy(() -> asTenant(TENANT_B, () -> bookingRepository.saveAndFlush(foreign)))
+                .hasStackTraceContaining("tenant");
+        assertThat(bookingCount()).isZero();
+    }
+
     // ---------- Helpers ----------
+
+    private static <T> T asTenant(long tenantId, Supplier<T> work) {
+        Jwt jwt = Jwt.withTokenValue("test").header("alg", "RS256").claim("tenant_id", tenantId).build();
+        SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(jwt));
+        try {
+            return work.get();
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+    }
+
+    private static List<Long> bookingIds(List<Booking> bookings) {
+        return bookings.stream().map(Booking::getId).sorted().toList();
+    }
 
     private static List<Integer> runConcurrently(List<Callable<Integer>> calls) throws Exception {
         CountDownLatch start = new CountDownLatch(1);

@@ -6,6 +6,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.TenantId;
 
 import java.time.Instant;
 
@@ -18,6 +19,8 @@ public class NotificationRow implements NotificationView {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    /** Hibernate tự lọc theo tenant của Session (xem TenantIdentifierResolver). */
+    @TenantId
     @Column(name = "tenant_id", nullable = false, updatable = false)
     private Long tenantId;
 

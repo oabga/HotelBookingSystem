@@ -1,6 +1,7 @@
 package com.hotelbooking.booking.service;
 
 import com.hotelbooking.booking.domain.BookingRepository;
+import com.hotelbooking.booking.security.TenantIdentifierResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -24,14 +25,17 @@ public class BookingExpiryJob {
         this.clock = clock;
     }
 
+    /** Job không có JWT và xử lý mọi tenant, nên chạy với tenant gốc của Hibernate. */
     @Scheduled(fixedDelayString = "${booking.expiry.interval}")
     public void expireOverdue() {
-        for (long id : bookings.findOverduePendingIds(clock.instant())) {
-            try {
-                bookingService.expire(id);
-            } catch (RuntimeException ex) {
-                log.error("Could not expire booking {}", id, ex);
+        TenantIdentifierResolver.runAsSystem(() -> {
+            for (long id : bookings.findOverduePendingIds(clock.instant())) {
+                try {
+                    bookingService.expire(id);
+                } catch (RuntimeException ex) {
+                    log.error("Could not expire booking {}", id, ex);
+                }
             }
-        }
+        });
     }
 }

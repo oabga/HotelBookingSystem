@@ -8,6 +8,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.TenantId;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -21,6 +22,8 @@ public class Booking {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    /** Hibernate tự lọc theo tenant của Session và từ chối INSERT khác tenant (xem TenantIdentifierResolver). */
+    @TenantId
     @Column(name = "tenant_id", nullable = false, updatable = false)
     private Long tenantId;
 
