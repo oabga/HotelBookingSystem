@@ -13,6 +13,8 @@ import java.util.Optional;
 
 /**
  * Mọi truy vấn theo người dùng đều bắt buộc có tenantId, nên không có đường đọc hoặc ghi xuyên tenant.
+ * {@code @TenantId} trên Booking lọc thêm các truy vấn dẫn xuất, nhưng không lọc truy vấn native và findById,
+ * nên tham số tenantId ở đây vẫn bắt buộc.
  * Các UPDATE trả về số dòng đổi được: READ COMMITTED đánh giá lại điều kiện sau khi chờ khóa,
  * nên giá trị này quyết định ai thắng khi có request đồng thời (docs/erd-v2.md §5.1, §6).
  */
